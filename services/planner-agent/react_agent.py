@@ -10,15 +10,26 @@ import structlog
 
 from platform_contracts.plan_result import PlanParams, PlanResult, PlannerRequest
 from plan_engine import plan as rule_plan
-from planning_tools import TOOL_SCHEMAS, execute_planning_tool
+from planning_tools import build_tool_schemas, execute_planning_tool
 from settings import PlannerSettings
 
 logger = structlog.get_logger(__name__)
 
-_SYSTEM_PROMPT = """你是锂电质量平台的 Planner Agent。职责：把用户自然语言转成 playbook + 参数，交给 Orchestrator 执行。
+
+def _build_system_prompt() -> str:
+    """动态构建 system prompt，playbook 列表随注册的 Agent 变化。"""
+    schemas = build_tool_schemas()
+    submit_enum = []
+    for s in schemas:
+        props = s.get("function", {}).get("parameters", {}).get("properties", {})
+        playbook_prop = props.get("playbook", {})
+        submit_enum = playbook_prop.get("enum", ["investigate", "trace_only", "rca", "close_loop"])
+        break
+    playbooks_str = "、".join(submit_enum)
+    return f"""你是锂电质量平台的 Planner Agent。职责：把用户自然语言转成 playbook + 参数，交给 Orchestrator 执行。
 
 约束（必须遵守）：
-1. 只能输出已实现剧本：investigate、trace_only、rca、close_loop。
+1. 只能输出已实现剧本：{playbooks_str}。
 2. 可调用 list_playbooks、get_capability_card 了解能力与剧本；禁止调用 trace/rca/8d 等业务服务。
 3. 最终必须调用 submit_plan 提交结果。
 4. investigate/trace_only/close_loop 通常需要 batch_id；从用户文本提取批次号（如 B202406001）。
@@ -43,7 +54,7 @@ async def _chat_completion(
         "model": settings.llm_model,
         "temperature": settings.llm_temperature,
         "messages": messages,
-        "tools": TOOL_SCHEMAS,
+        "tools": build_tool_schemas(),
         "tool_choice": "auto",
     }
     headers = {"Authorization": f"Bearer {settings.llm_api_key}", "Content-Type": "application/json"}
@@ -81,7 +92,7 @@ async def plan_with_react(req: PlannerRequest, settings: PlannerSettings) -> Pla
         user_lines.append(f"defect_type: {req.defect_type}")
 
     messages: list[dict[str, Any]] = [
-        {"role": "system", "content": _SYSTEM_PROMPT},
+        {"role": "system", "content": _build_system_prompt()},
         {"role": "user", "content": "\n".join(user_lines)},
     ]
 

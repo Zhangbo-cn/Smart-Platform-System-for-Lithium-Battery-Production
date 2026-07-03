@@ -8,6 +8,7 @@ import structlog
 from fastapi import FastAPI, HTTPException
 from python_a2a import Task
 
+from harness_core.agent_bootstrap import register_with_registry
 from platform_contracts.a2a_server import AsyncA2AServer
 from platform_contracts.agent_handoffs import TriageRequest, TriageResponse
 from platform_contracts.agent_registry_seed import TRIAGE_AGENT_CARD
@@ -46,6 +47,16 @@ async def lifespan(app: FastAPI):
     state.server = server
     app.state.svc = state
     server.mount(app)
+    settings = get_settings()
+    # 注册到 Capability Registry（非阻塞，失败不影响启动）
+    registry_url = getattr(settings, "registry_url", "http://localhost:8021")
+    await register_with_registry(
+        registry_url=registry_url,
+        agent_name=_SERVICE,
+        agent_description=TRIAGE_AGENT_CARD.description,
+        agent_url="http://localhost:8001",
+        capabilities=TRIAGE_AGENT_CARD.capabilities,
+    )
     logger.info("triage_agent.startup")
     try:
         yield

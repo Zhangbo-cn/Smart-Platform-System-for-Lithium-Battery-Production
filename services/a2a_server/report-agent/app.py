@@ -9,7 +9,7 @@ from fastapi import FastAPI, HTTPException
 from python_a2a import Task
 
 from deep_agent_runner import run_report_with_deep_agent
-from harness_core.agent_bootstrap import bootstrap_agent_tools
+from harness_core.agent_bootstrap import bootstrap_agent_tools, register_with_registry
 from harness_core.tool_registry import ToolRegistry
 from platform_contracts.a2a_server import AsyncA2AServer
 from platform_contracts.agent_handoffs import Report8dRequest, Report8dResponse
@@ -77,6 +77,14 @@ async def lifespan(app: FastAPI):
     state.mcp_failed = failed
     app.state.svc = state
     server.mount(app)
+    # 注册到 Capability Registry
+    await register_with_registry(
+        registry_url=settings.registry_url,
+        agent_name=_SERVICE,
+        agent_description=REPORT_REPORTER_AGENT_CARD.description,
+        agent_url="http://localhost:8004",
+        capabilities=REPORT_REPORTER_AGENT_CARD.capabilities,
+    )
     logger.info(
         "report_reporter_agent.startup",
         mode=settings.reporter_mode,

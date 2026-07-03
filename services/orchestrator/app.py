@@ -20,6 +20,7 @@ from harness_core.events.bus import get_event_bus, init_event_bus
 from harness_core.events.stream import publish_task_event, sse_event_stream
 from harness_core.playbook_engine import PlaybookEngine
 from platform_contracts.a2a import A2AClient, A2AError, mount_a2a
+from platform_contracts.agent_card import AgentCard
 from platform_contracts.agent_handoffs import RcaInvokeRequest, Report8dRequest
 from platform_contracts.agent_network import AgentNetwork
 from platform_contracts.agent_registry_seed import ALL_REGISTERED_AGENT_CARDS, ORCHESTRATOR_CARD
@@ -41,6 +42,7 @@ class OrchestratorSettings(BaseSettings):
     report_reporter_agent_url: str = "http://127.0.0.1:8004"
     registry_url: str = "http://127.0.0.1:8021"
     http_timeout: float = 120.0
+    enable_dynamic_discovery: bool = True
     http_retries: int = 2
     internal_service_key: str = "dev-router-key"
     sse_heartbeat_interval: float = 15.0
@@ -55,7 +57,8 @@ settings = OrchestratorSettings()
 
 
 def _agent_network() -> AgentNetwork:
-    return AgentNetwork.from_cards(
+    """获取 Agent 网络（静态种子 + 动态 Registry 发现合并）。"""
+    net = AgentNetwork.from_cards(
         ALL_REGISTERED_AGENT_CARDS,
         url_overrides={
             "triage-agent": settings.triage_agent_url,
@@ -65,6 +68,39 @@ def _agent_network() -> AgentNetwork:
             "report-reporter-agent": settings.report_reporter_agent_url,
         },
     )
+    # 动态发现已在 lifespan 中执行，_discovered_cards 缓存在模块级
+    for card in _discovered_cards:
+        net.add(card)
+    return net
+
+
+# 缓存 Registry 发现的 AgentCard（运行时动态更新）
+_discovered_cards: list[AgentCard] = []
+
+
+async def _discover_from_registry() -> list[AgentCard]:
+    """从 Capability Registry 动态拉取 AgentCard。"""
+    if not settings.enable_dynamic_discovery:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{settings.registry_url.rstrip('/')}/registry/agents")
+            if resp.status_code == 200:
+                data = resp.json()
+                cards = []
+                for item in data if isinstance(data, list) else data.get("agents", data):
+                    if isinstance(item, dict):
+                        try:
+                            cards.append(AgentCard(**item))
+                        except Exception:
+                            pass
+                logger.info("router.discovered_agents", count=len(cards), registry=settings.registry_url)
+                return cards
+    except Exception as exc:
+        logger.warning("router.discover_failed", registry=settings.registry_url, error=str(exc))
+    return []
+
+
 _sessions: SessionStore = build_session_store(
     settings.context_backend,
     redis_url=settings.redis_url,
@@ -112,15 +148,18 @@ class AsyncDispatchResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _playbook_engine
+    global _playbook_engine, _discovered_cards
     init_event_bus(settings.event_backend, redis_url=settings.redis_url)
     _playbook_engine = PlaybookEngine(Path(__file__).parent.parent.parent / "config" / "playbooks.yaml")
     _playbook_engine.load()
+    # 从 Registry 动态发现 Agent
+    _discovered_cards = await _discover_from_registry()
     logger.info(
         "router.startup",
         context_backend=settings.context_backend,
         event_backend=settings.event_backend,
         playbooks_loaded=len(_playbook_engine.playbooks),
+        discovered_agents=len(_discovered_cards),
         redis_url=settings.redis_url
         if settings.context_backend == "redis" or settings.event_backend == "redis"
         else None,
@@ -271,7 +310,13 @@ async def _apply_triage(
 
     ctx.defect_type = tri.defect_type
     ctx.severity = tri.severity
-    ctx.triage_result = tri.model_dump(mode="json")
+    tri_dict = tri.model_dump(mode="json")
+    ctx.triage_result = tri_dict
+    # 保存 next_agents（供后续步骤动态路由用）
+    next_agents = tri_dict.get("next_agents", [])
+    if next_agents:
+        ctx.artifacts["triage_next_agents"] = next_agents
+        logger.info("triage.suggested_next", agents=[n.get("agent_name") for n in next_agents])
     await _save_context(ctx)
     await publish_task_event(
         get_event_bus(),

@@ -8,7 +8,7 @@ import structlog
 from fastapi import FastAPI, HTTPException
 from python_a2a import Task
 
-from harness_core.agent_bootstrap import bootstrap_agent_tools
+from harness_core.agent_bootstrap import bootstrap_agent_tools, register_with_registry
 from harness_core.tool_registry import ToolRegistry
 from platform_contracts.a2a_server import AsyncA2AServer
 from platform_contracts.agent_handoffs import TraceRequest, TraceResponse
@@ -60,6 +60,14 @@ async def lifespan(app: FastAPI):
     state.mcp_failed = failed
     app.state.svc = state
     server.mount(app)
+    # 注册到 Capability Registry
+    await register_with_registry(
+        registry_url=settings.registry_url,
+        agent_name=_SERVICE,
+        agent_description=TRACE_WORKER_CARD.description,
+        agent_url="http://localhost:8002",
+        capabilities=TRACE_WORKER_CARD.capabilities,
+    )
     logger.info("trace_worker.startup", mcp_connected=connected, mcp_failed=failed)
     try:
         yield

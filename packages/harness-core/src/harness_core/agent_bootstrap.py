@@ -1,6 +1,9 @@
-"""薄 Agent 统一 MCP bootstrap（读 platform-contracts 矩阵）。"""
+"""薄 Agent 统一 MCP bootstrap + A2A 注册（读 platform-contracts 矩阵）。"""
 
 from __future__ import annotations
+
+import httpx
+import structlog
 
 from harness_core.bootstrap import bootstrap_mcp_registry
 from harness_core.mcp_client import MCPClient
@@ -11,6 +14,8 @@ from platform_contracts.mcp_tool_matrix import (
     servers_for_agent,
     tool_policies_for,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 def _load_exclusive_tools() -> dict[str, str]:
@@ -44,3 +49,47 @@ async def bootstrap_agent_tools(
         sensitive_tools=sensitive,
         role_restricted=role_restricted,
     )
+
+
+async def register_with_registry(
+    registry_url: str,
+    agent_name: str,
+    agent_description: str,
+    agent_url: str,
+    capabilities: list[str],
+    *,
+    version: str = "1.0.0",
+    timeout: float = 5.0,
+) -> bool:
+    """向 Capability Registry 注册当前 Agent。
+
+    用于 Agent 启动后在 lifespan 中调用。注册成功后 Registry 会定期发心跳探测。
+    """
+    import json
+
+    payload = {
+        "name": agent_name,
+        "description": agent_description,
+        "url": agent_url.rstrip("/"),
+        "version": version,
+        "capabilities": capabilities,
+        "skills": [
+            {
+                "id": cap,
+                "name": cap,
+                "description": f"{agent_name} capability: {cap}",
+            }
+            for cap in capabilities
+        ],
+        "enabled": True,
+    }
+    try:
+        url = f"{registry_url.rstrip('/')}/registry/register"
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            resp = await client.post(url, json=payload)
+            resp.raise_for_status()
+            logger.info("registry.registered", agent=agent_name, url=registry_url)
+            return True
+    except Exception as exc:
+        logger.warning("registry.register_failed", agent=agent_name, error=str(exc))
+        return False

@@ -10,7 +10,7 @@ Agent 互调专用，不属于 harness-core（MCP / RBAC / 审计）。
 from __future__ import annotations
 
 import json
-from typing import Any, Awaitable, Callable
+from typing import Any, AsyncGenerator, Awaitable, Callable
 
 import httpx
 import structlog
@@ -241,6 +241,51 @@ class A2AClient:
         if data.get("error"):
             raise A2AError(f"resume@{agent_url}: {data['error'].get('message')}")
         return _task_result(Task.from_dict(data.get("result", {})))
+
+    async def stream_task(
+        self,
+        agent_url: str,
+        payload: dict[str, Any],
+        *,
+        session_id: str,
+        schema: str,
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        """流式调用 A2A 任务，通过 SSE 获取中间结果。
+
+        Yields 事件块：{"event": "update"|"complete"|"error", "data": ...}
+        """
+        base = agent_url.rstrip("/")
+        endpoint = f"{base}{self._prefix}/tasks/stream"
+        task = _payload_to_task(payload, session_id=session_id, schema=schema)
+        request_body = {"jsonrpc": "2.0", "id": 1, "method": "tasks/stream", "params": task.to_dict()}
+        try:
+            async with httpx.AsyncClient(timeout=300.0) as stream_http:
+                async with stream_http.stream(
+                    "POST", endpoint, json=request_body, headers=self._headers,
+                ) as resp:
+                    if resp.status_code != 200:
+                        yield {"event": "error", "data": {"code": resp.status_code, "text": await resp.aread()}}
+                        return
+                    buffer = ""
+                    async for chunk in resp.aiter_text():
+                        buffer += chunk
+                        while "\n\n" in buffer:
+                            event_line, buffer = buffer.split("\n\n", 1)
+                            etype, edata = "update", None
+                            for line in event_line.split("\n"):
+                                if line.startswith("event:"):
+                                    etype = line[6:].strip()
+                                elif line.startswith("data:"):
+                                    edata = line[5:].strip()
+                            if edata:
+                                try:
+                                    yield {"event": etype, "data": json.loads(edata)}
+                                except json.JSONDecodeError:
+                                    yield {"event": etype, "data": {"text": edata}}
+        except Exception as exc:
+            yield {"event": "error", "data": {"error": str(exc)}}
+        finally:
+            yield {"event": "complete", "data": {"status": "done"}}
 
     async def _rpc(self, agent_url: str, method: str, params: dict[str, Any]) -> dict[str, Any]:
         base = agent_url.rstrip("/")

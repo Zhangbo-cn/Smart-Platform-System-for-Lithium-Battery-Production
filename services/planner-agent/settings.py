@@ -14,6 +14,7 @@ class PlannerSettings(BaseSettings):
     llm_temperature: float = 0.1
     max_react_turns: int = 8
     http_timeout: float = 60.0
+    registry_url: str = "http://localhost:8021"
 
 
 @lru_cache

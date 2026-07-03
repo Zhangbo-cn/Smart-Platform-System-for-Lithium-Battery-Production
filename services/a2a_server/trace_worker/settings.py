@@ -8,6 +8,7 @@ class TraceSettings(BaseSettings):
 
     mcp_mes_url: str = "http://localhost:8101/sse"
     mcp_scada_url: str = "http://localhost:8102/sse"
+    registry_url: str = "http://localhost:8021"
 
 
 @lru_cache

@@ -33,6 +33,15 @@ class TriageRequest(BaseModel):
     batch_id: str | None = None
 
 
+class NextAgent(BaseModel):
+    """Agent 建议的下游步骤。支持直接 A2A 调用或 Orchestrator 中转。"""
+    agent_name: str
+    agent_url: str | None = None
+    step_name: str = ""
+    confidence: float = 1.0
+    payload_hint: dict[str, Any] = Field(default_factory=dict)
+
+
 class TriageResponse(BaseModel):
     """Router 合并进 PlatformContext.defect_type / severity / triage_result"""
 
@@ -40,6 +49,11 @@ class TriageResponse(BaseModel):
     severity: Literal["low", "medium", "high", "critical"] = "medium"
     suggest_next: Literal["trace", "rca", "none"] = "trace"
     stub: bool = True
+    next_agents: list[NextAgent] = Field(
+        default_factory=list,
+        description="Triage 建议的下游 Agent 列表。"
+        "Orchestrator 可据此直接路由，无需硬编码 playbook。"
+    )
 
 
 # ----- RCA → report-8d-agent -----

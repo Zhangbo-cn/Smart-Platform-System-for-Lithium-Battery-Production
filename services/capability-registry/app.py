@@ -1,8 +1,16 @@
-"""Capability Registry：AgentCard 种子 + 后台心跳探活（无 LLM，非 Agent）。"""
+"""Capability Registry：AgentCard 动态注册 + 心跳探活（无 LLM，非 Agent）。
+
+支持两种模式：
+- 静态模式（默认）：从 agent_registry_seed.py 加载种子卡片
+- 动态模式：Agent 启动时通过 POST /registry/register 注册，
+           通过 POST /registry/heartbeat 发送心跳，
+           5 分钟无心跳自动摘除
+"""
 
 from __future__ import annotations
 
 import asyncio
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from typing import Any
@@ -10,24 +18,59 @@ from typing import Any
 import httpx
 import structlog
 from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 
 from platform_contracts.a2a import mount_a2a
 from harness_core.health.probe import probe_http_health
+from platform_contracts.agent_card import AgentCard
 from platform_contracts.agent_registry_seed import ALL_REGISTERED_AGENT_CARDS, CAPABILITY_REGISTRY_CARD
 from platform_contracts.task_events import AgentHealthRecord, AgentHealthStatus
 
 logger = structlog.get_logger(__name__)
 
-_CARDS = {c.name: c for c in ALL_REGISTERED_AGENT_CARDS}
+# 静态种子卡片（启动时加载）
+_STATIC_CARDS = {c.name: c for c in ALL_REGISTERED_AGENT_CARDS}
+# 动态注册的卡片（运行时添加，覆盖静态）
+_DYNAMIC_CARDS: dict[str, AgentCard] = {}
 _HEALTH: dict[str, AgentHealthRecord] = {}
+# 心跳追踪：name -> last_heartbeat_timestamp
+_LAST_HEARTBEAT: dict[str, float] = {}
+_PRUNING_LOCK = asyncio.Lock()
+_HEARTBEAT_TIMEOUT_SEC = 300.0  # 5 分钟无心跳自动摘除
 _PROBE_INTERVAL_SEC = 30.0
 _PROBE_TASK: asyncio.Task | None = None
+_PRUNING_TASK: asyncio.Task | None = None
+
+
+def _all_cards() -> dict[str, AgentCard]:
+    """合并静态 + 动态卡片（动态覆盖静态）。"""
+    cards = dict(_STATIC_CARDS)
+    cards.update(_DYNAMIC_CARDS)
+    return cards
+
+
+class RegisterRequest(BaseModel):
+    """Agent 注册请求体。"""
+    name: str
+    description: str = ""
+    url: str
+    version: str = "1.0.0"
+    capabilities: list[str] = []
+    skills: list[dict[str, Any]] = []
+    mcp_servers: list[str] = []
+    enabled: bool = True
+
+
+class HeartbeatRequest(BaseModel):
+    """Agent 心跳请求体。"""
+    url: str
 
 
 def _list_agents_payload() -> list[dict[str, Any]]:
+    cards = _all_cards()
     out: list[dict[str, Any]] = []
-    for c in ALL_REGISTERED_AGENT_CARDS:
-        h = _HEALTH.get(c.name)
+    for name, c in cards.items():
+        h = _HEALTH.get(name)
         out.append(
             {
                 "name": c.name,
@@ -43,7 +86,8 @@ def _list_agents_payload() -> list[dict[str, Any]]:
 
 
 async def _get_health_record(name: str) -> AgentHealthRecord:
-    card = _CARDS.get(name)
+    cards = _all_cards()
+    card = cards.get(name)
     if card is None:
         raise HTTPException(404, f"agent not found: {name}")
     if not card.enabled:
@@ -60,10 +104,11 @@ async def _get_health_record(name: str) -> AgentHealthRecord:
 
 
 async def _probe_all() -> None:
+    cards = _all_cards()
     async with httpx.AsyncClient(timeout=5.0) as client:
-        for card in ALL_REGISTERED_AGENT_CARDS:
+        for name, card in cards.items():
             if card.enabled:
-                _HEALTH[card.name] = await probe_http_health(client, card, previous=_HEALTH.get(card.name))
+                _HEALTH[name] = await probe_http_health(client, card, previous=_HEALTH.get(name))
 
 
 async def _registry_a2a_handler(
@@ -72,13 +117,14 @@ async def _registry_a2a_handler(
     fwd: dict[str, str],
 ) -> dict[str, Any]:
     action = payload.get("action", "list")
+    cards = _all_cards()
     if action == "list":
         return {"agents": _list_agents_payload()}
     if action == "get_card":
         name = payload.get("name")
         if not name:
             raise ValueError("name required for get_card")
-        card = _CARDS.get(name)
+        card = cards.get(name)
         if card is None:
             raise ValueError(f"agent not found: {name}")
         return card.model_dump()
@@ -97,34 +143,57 @@ async def _registry_a2a_handler(
     raise ValueError(f"unknown registry action: {action}")
 
 
+async def _prune_stale_agents() -> None:
+    """摘除超过 HEARTBEAT_TIMEOUT_SEC 未发送心跳的动态 Agent。"""
+    now = time.time()
+    stale = []
+    async with _PRUNING_LOCK:
+        for name, last_ts in list(_LAST_HEARTBEAT.items()):
+            if name not in _DYNAMIC_CARDS:
+                continue
+            if now - last_ts > _HEARTBEAT_TIMEOUT_SEC:
+                stale.append(name)
+                _DYNAMIC_CARDS.pop(name, None)
+                _LAST_HEARTBEAT.pop(name, None)
+                _HEALTH.pop(name, None)
+    for name in stale:
+        logger.warning("registry.pruned_stale_agent", agent=name, timeout_sec=_HEARTBEAT_TIMEOUT_SEC)
+
+
 async def _probe_loop() -> None:
+    probe_count = 0
     async with httpx.AsyncClient(timeout=5.0) as client:
         while True:
-            for card in ALL_REGISTERED_AGENT_CARDS:
+            cards = _all_cards()
+            for name, card in cards.items():
                 if not card.enabled:
-                    _HEALTH[card.name] = AgentHealthRecord(
-                        name=card.name,
+                    _HEALTH[name] = AgentHealthRecord(
+                        name=name,
                         status=AgentHealthStatus.UNKNOWN,
                         url=card.url,
                         detail="disabled",
                     )
                     continue
-                prev = _HEALTH.get(card.name)
+                prev = _HEALTH.get(name)
                 record = await probe_http_health(client, card, previous=prev)
-                _HEALTH[card.name] = record
+                _HEALTH[name] = record
                 if record.status == AgentHealthStatus.DOWN:
                     logger.warning(
                         "registry.agent_down",
-                        agent=card.name,
+                        agent=name,
                         failures=record.consecutive_failures,
                         detail=record.detail,
                     )
+            # 每 5 轮清理一次失联 Agent
+            probe_count += 1
+            if probe_count % 5 == 0:
+                await _prune_stale_agents()
             await asyncio.sleep(_PROBE_INTERVAL_SEC)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _PROBE_TASK
+    global _PROBE_TASK, _PRUNING_TASK
     _PROBE_TASK = asyncio.create_task(_probe_loop())
     logger.info("registry.probe_started", interval_sec=_PROBE_INTERVAL_SEC)
     yield
@@ -153,7 +222,8 @@ def list_agents() -> list[dict]:
 
 @app.get("/a2a/v1/agents/{name}/card")
 def get_card(name: str) -> dict:
-    card = _CARDS.get(name)
+    cards = _all_cards()
+    card = cards.get(name)
     if card is None:
         raise HTTPException(404, f"agent not found: {name}")
     return card.model_dump()
@@ -168,3 +238,64 @@ async def get_agent_health(name: str) -> AgentHealthRecord:
 async def probe_all_agents() -> list[AgentHealthRecord]:
     await _probe_all()
     return list(_HEALTH.values())
+
+
+# ── 动态注册端点（兼容 python_a2a DiscoveryClient 模式）──
+
+
+@app.post("/registry/register")
+async def register_agent(req: RegisterRequest) -> dict:
+    card = AgentCard(
+        name=req.name,
+        description=req.description,
+        url=req.url,
+        version=req.version,
+        capabilities=req.capabilities,
+        skills=[
+            AgentSkill(id=s.get("id", s.get("name", "")), name=s.get("name", ""), description=s.get("description"))
+            for s in req.skills
+        ],
+        mcp_servers=req.mcp_servers,
+        enabled=req.enabled,
+    )
+    _DYNAMIC_CARDS[req.name] = card
+    _LAST_HEARTBEAT[req.name] = time.time()
+    logger.info("registry.agent_registered", agent=req.name, url=req.url)
+    return {"status": "registered", "name": req.name, "url": req.url}
+
+
+@app.post("/registry/unregister")
+async def unregister_agent(req: HeartbeatRequest) -> dict:
+    name_to_remove = None
+    for name, card in list(_DYNAMIC_CARDS.items()):
+        if card.url == req.url or card.url.rstrip("/") == req.url.rstrip("/"):
+            name_to_remove = name
+            break
+    if name_to_remove:
+        _DYNAMIC_CARDS.pop(name_to_remove, None)
+        _LAST_HEARTBEAT.pop(name_to_remove, None)
+        _HEALTH.pop(name_to_remove, None)
+        logger.info("registry.agent_unregistered", agent=name_to_remove, url=req.url)
+        return {"status": "unregistered", "url": req.url}
+    return {"status": "not_found", "url": req.url, "note": "not a dynamically registered agent"}
+
+
+@app.post("/registry/heartbeat")
+async def heartbeat_agent(req: HeartbeatRequest) -> dict:
+    for name, card in _all_cards().items():
+        if card.url == req.url or card.url.rstrip("/") == req.url.rstrip("/"):
+            _LAST_HEARTBEAT[name] = time.time()
+            if name in _DYNAMIC_CARDS:
+                _HEALTH[name] = AgentHealthRecord(
+                    name=name,
+                    status=AgentHealthStatus.UP,
+                    url=card.url,
+                    detail="heartbeat received",
+                )
+            return {"status": "ok", "name": name}
+    return {"status": "unknown", "url": req.url, "note": "agent not registered"}
+
+
+@app.get("/registry/agents")
+async def list_registered_agents() -> list[dict]:
+    return [c.model_dump() for c in _all_cards().values()]

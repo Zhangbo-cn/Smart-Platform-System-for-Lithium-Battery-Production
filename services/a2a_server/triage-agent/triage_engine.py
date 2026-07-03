@@ -9,7 +9,7 @@ from typing import Any, Literal
 import structlog
 from openai import OpenAI
 
-from platform_contracts.agent_handoffs import TriageRequest, TriageResponse
+from platform_contracts.agent_handoffs import NextAgent, TriageRequest, TriageResponse
 
 logger = structlog.get_logger(__name__)
 
@@ -79,12 +79,34 @@ def _rule_triage(req: TriageRequest) -> TriageResponse:
     defect = _rule_defect(query)
     severity = _rule_severity(query, defect)
     batch_ids = _extract_batch_ids(query)
-    suggest: Literal["trace", "rca", "none"] = "trace" if (req.batch_id or batch_ids) else "rca"
+    has_batch = bool(req.batch_id or batch_ids)
+    suggest: Literal["trace", "rca", "none"] = "trace" if has_batch else "rca"
+
+    # 构造下游建议
+    next_agents: list[NextAgent] = []
+    if has_batch:
+        next_agents.append(NextAgent(
+            agent_name="trace-worker",
+            agent_url="http://localhost:8002",
+            step_name="trace",
+            confidence=0.9,
+            payload_hint={"batch_id": req.batch_id or (batch_ids[0] if batch_ids else "")},
+        ))
+    if defect != "unknown_defect":
+        next_agents.append(NextAgent(
+            agent_name="quality-rca-agent",
+            agent_url="http://localhost:8003",
+            step_name="rca",
+            confidence=0.8 if has_batch else 0.6,
+            payload_hint={"defect_type": defect, "user_query": req.query},
+        ))
+
     return TriageResponse(
         defect_type=defect,
         severity=severity,
         suggest_next=suggest,
         stub=True,
+        next_agents=next_agents,
     )
 
 

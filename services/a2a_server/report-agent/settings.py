@@ -15,6 +15,7 @@ class Report8dSettings(BaseSettings):
     llm_temperature: float = 0.2
     langsmith_api_key: str = ""
     langsmith_project: str = "battery-reporter-agent"
+    registry_url: str = "http://localhost:8021"
     http_timeout: float = 120.0
 
 
