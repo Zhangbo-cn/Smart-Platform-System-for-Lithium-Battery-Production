@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>锂电品质 Copilot</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a2332;
+      --border: #2d3a4f;
+      --text: #e8edf4;
+      --muted: #8b9cb3;
+      --accent: #3b82f6;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 1.5rem;
+      line-height: 1.5;
+    }
+    h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 0.25rem; }
+    .sub { color: var(--muted); font-size: 0.875rem; margin-bottom: 1.5rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; max-width: 1100px; }
+    @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 1rem 1.25rem;
+    }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 0.25rem; }
+    input, select, textarea {
+      width: 100%;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 0.5rem 0.65rem;
+      margin-bottom: 0.75rem;
+      font-size: 0.9rem;
+    }
+    textarea { min-height: 72px; resize: vertical; }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 0.55rem 1rem;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); }
+    .log {
+      font-family: ui-monospace, monospace;
+      font-size: 0.75rem;
+      max-height: 320px;
+      overflow-y: auto;
+      background: var(--bg);
+      border-radius: 6px;
+      padding: 0.5rem;
+      white-space: pre-wrap;
+    }
+    .log .ev { margin-bottom: 0.35rem; color: var(--muted); }
+    .log .ev strong { color: var(--accent); }
+    #hitlPanel { display: none; margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 1rem; }
+    #hitlPanel.visible { display: block; }
+    .badge { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.45rem; border-radius: 4px; background: var(--border); }
+    .badge.live { background: #14532d; color: var(--ok); }
+    .row { display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center; }
+    .status { font-size: 0.85rem; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <h1>锂电品质 Copilot</h1>
+  <p class="sub">任务提交 · SSE 进度 · HITL 签核 · close_loop 续跑</p>
+
+  <div class="grid">
+    <div class="card">
+      <form id="taskForm">
+        <label>分析描述</label>
+        <textarea id="message" placeholder="批次 B001 涂布面密度偏低，请分析根因">涂布面密度偏低，请分析根因并闭环</textarea>
+        <label>批次号</label>
+        <input id="batchId" value="B001" />
+        <label>剧本</label>
+        <select id="playbook">
+          <option value="investigate">investigate（分诊→追溯→RCA）</option>
+          <option value="close_loop" selected>close_loop（RCA→8D→QMS）</option>
+          <option value="trace_only">trace_only</option>
+          <option value="rca">rca</option>
+        </select>
+        <div class="row">
+          <button type="submit" id="submitBtn">提交任务</button>
+          <span class="status" id="sessionInfo"></span>
+        </div>
+      </form>
+
+      <div id="hitlPanel">
+        <p><span class="badge warn">HITL</span> 需要人工签核后继续</p>
+        <label>根因确认（可修改）</label>
+        <input id="rootCause" />
+        <label>审批意见</label>
+        <textarea id="feedback" placeholder="已与产线确认…"></textarea>
+        <div class="row">
+          <label><input type="checkbox" id="approved" checked /> 批准继续</label>
+        </div>
+        <div class="row" style="margin-top: 0.5rem">
+          <button type="button" id="resumeBtn">签核并续跑 close_loop</button>
+          <button type="button" class="secondary" id="resumeInvestigateBtn">仅恢复 RCA</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="row" style="justify-content: space-between; margin-bottom: 0.5rem">
+        <strong>事件流</strong>
+        <span class="badge" id="connBadge">idle</span>
+      </div>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+
+  <script>
+    let sessionId = null;
+    let es = null;
+    let hitlPayload = null;
+
+    const logEl = document.getElementById("log");
+    const hitlPanel = document.getElementById("hitlPanel");
+    const connBadge = document.getElementById("connBadge");
+
+    function appendLog(text, cls = "ev") {
+      const d = document.createElement("div");
+      d.className = cls;
+      d.innerHTML = text;
+      logEl.appendChild(d);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function connectSSE(sid) {
+      if (es) { es.close(); es = null; }
+      connBadge.textContent = "connecting";
+      connBadge.classList.remove("live");
+      es = new EventSource(`/v1/assistant/tasks/${sid}/stream`);
+      es.onopen = () => {
+        connBadge.textContent = "live";
+        connBadge.classList.add("live");
+      };
+      es.onerror = () => {
+        connBadge.textContent = "reconnecting";
+        connBadge.classList.remove("live");
+      };
+      const handlers = ["connected", "heartbeat", "task.submitted", "task.running",
+        "step.started", "step.completed", "task.input_required", "task.completed", "task.failed"];
+      handlers.forEach(name => {
+        es.addEventListener(name, (e) => {
+          let data = {};
+          try { data = JSON.parse(e.data); } catch (_) {}
+          appendLog(`<strong>${name}</strong> ${data.step || ""} ${data.message || ""}`.trim());
+          if (name === "task.input_required") {
+            showHitl(data);
+            if (data.payload?.root_cause) {
+              document.getElementById("rootCause").value = data.payload.root_cause;
+            }
+          }
+          if (name === "task.completed" || name === "task.failed") {
+            hitlPanel.classList.remove("visible");
+          }
+        });
+      });
+    }
+
+    function showHitl(data) {
+      hitlPayload = data.payload || {};
+      if (data.payload?.thread_id) hitlPayload.thread_id = data.payload.thread_id;
+      if (data.payload?.hitl_request_id) hitlPayload.hitl_request_id = data.payload.hitl_request_id;
+      hitlPanel.classList.add("visible");
+      document.getElementById("rootCause").value =
+        data.payload?.root_cause || hitlPayload.partial_result || "";
+    }
+
+    document.getElementById("taskForm").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      document.getElementById("submitBtn").disabled = true;
+      hitlPanel.classList.remove("visible");
+      logEl.innerHTML = "";
+      const body = {
+        message: document.getElementById("message").value,
+        batch_id: document.getElementById("batchId").value,
+        playbook: document.getElementById("playbook").value,
+        confirm_rca: true,
+        hitl_approved: false,
+      };
+      try {
+        const res = await fetch("/v1/assistant/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || res.statusText);
+        sessionId = data.session_id;
+        document.getElementById("sessionInfo").textContent = `session: ${sessionId}`;
+        appendLog(`<strong>submitted</strong> trace=${data.trace_id}`);
+        connectSSE(sessionId);
+      } catch (err) {
+        appendLog(`<strong>error</strong> ${err.message}`);
+      } finally {
+        document.getElementById("submitBtn").disabled = false;
+      }
+    });
+
+    async function resume(playbook) {
+      if (!sessionId) return;
+      const body = {
+        approved: document.getElementById("approved").checked,
+        root_cause: document.getElementById("rootCause").value || null,
+        feedback: document.getElementById("feedback").value,
+        playbook,
+        thread_id: hitlPayload?.thread_id || null,
+        hitl_request_id: hitlPayload?.hitl_request_id || null,
+      };
+      document.getElementById("resumeBtn").disabled = true;
+      try {
+        const res = await fetch(`/v1/assistant/tasks/${sessionId}/resume`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(typeof data.detail === "string" ? data.detail : JSON.stringify(data));
+        appendLog(`<strong>resumed</strong> status=${data.status}`);
+        hitlPanel.classList.remove("visible");
+        connectSSE(sessionId);
+      } catch (err) {
+        appendLog(`<strong>resume error</strong> ${err.message}`);
+      } finally {
+        document.getElementById("resumeBtn").disabled = false;
+      }
+    }
+
+    document.getElementById("resumeBtn").addEventListener("click", () => resume("close_loop"));
+    document.getElementById("resumeInvestigateBtn").addEventListener("click", () => resume("investigate"));
+  </script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+[project]
+name = "harness-core"
+version = "0.1.0"
+description = "Shared ToolRegistry, MCP client, RBAC, audit, retry for all business agents"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx>=0.27.0",
+    "mcp>=1.0.0",
+    "platform-contracts",
+    "structlog>=24.4.0",
+]
+
+[project.optional-dependencies]
+redis = ["redis>=5.2.0"]
+postgres = ["asyncpg>=0.30.0"]
+neo4j = ["neo4j>=5.0.0"]
+milvus = ["pymilvus>=2.4.0"]
+knowledge = ["neo4j>=5.0.0", "pymilvus>=2.4.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/harness_core"]

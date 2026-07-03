@@ -1,0 +1,4 @@
+# 平台根依赖（开发）
+
+pip install -e packages/platform-contracts
+pip install -e packages/harness-core

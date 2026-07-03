@@ -1,0 +1,22 @@
+cases:
+  - case_id: GC-001
+    user_query: "A 线昨天下午容量低的电芯，分析下原因"
+    expected_root_causes:
+      - 涂布厚度
+      - 烘烤温度
+    defect_type: 容量低
+    notes: 历史确认根因为涂布厚度波动 std > 2μm
+  - case_id: GC-002
+    user_query: "B 线本周内阻偏高的电芯增多，帮我看下"
+    expected_root_causes:
+      - 辊压压力
+      - 极片压实密度
+    defect_type: 内阻高
+    notes: ""
+  - case_id: GC-003
+    user_query: "化成分容后析锂的电芯主要在哪个班次产生？"
+    expected_root_causes:
+      - 化成电流过大
+      - 注液量不足
+    defect_type: 析锂
+    notes: ""

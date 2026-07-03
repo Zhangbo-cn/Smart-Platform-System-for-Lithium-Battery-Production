@@ -1,0 +1,17 @@
+﻿defect_type,node_name,parent_name,tool,tool_args_json,metric_key,direction,threshold,weight,rec_immediate,rec_long_term
+容量衰减,负极析锂,__ROOT__,,{},,,,1.0,,
+容量衰减,负极容量裕度不足_NP比偏低,负极析锂,scada.query_equipment_timeseries,"{""process"": ""涂布"", ""sensor_tags"": [""np_ratio""]}",np_ratio,<,1.05,0.5,复核正负极涂布面密度配比，调整 N/P 比至 1.08-1.15,在涂布工序加入 N/P 比在线计算与 SPC 监控
+容量衰减,充电电流过大,负极析锂,scada.query_equipment_timeseries,"{""process"": ""化成"", ""sensor_tags"": [""charge_current_c""]}",charge_current_c,>,0.5,0.3,降低化成/充电电流至 0.3C 以下重新评估,建立分容充电曲线库，按体系匹配电流上限
+容量衰减,低温充电,负极析锂,scada.query_equipment_timeseries,"{""sensor_tags"": [""ambient_temp_c""]}",ambient_temp_c,<,10.0,0.2,禁止低温环境充电，加装环境温控,
+容量衰减,活性锂损失,__ROOT__,,{},,,,1.0,,
+容量衰减,水分超标副反应,活性锂损失,lims.query_process_test,"{""process"": ""注液前"", ""metric"": ""moisture_ppm""}",moisture_ppm,>,300.0,0.5,,
+容量衰减,注液前烘烤不充分,水分超标副反应,scada.query_equipment_timeseries,"{""process"": ""烘烤"", ""sensor_tags"": [""bake_temp_c"", ""bake_duration_s""]}",bake_temp_c,<,85.0,0.5,提高注液前真空烘烤温度/时间，复测水分,烘烤工序加水分在线检测联锁
+容量衰减,电解液吸湿性偏高,水分超标副反应,erp.query_material_batch,"{""material"": ""电解液""}",hygroscopicity_index,>,1.2,0.5,,
+容量衰减,供应商电解液质量异常,电解液吸湿性偏高,lims.query_material_test,"{""material"": ""电解液""}",moisture_sensitivity,>,1.2,1.0,隔离该批次电解液，切换备用合格供应商,新增电解液吸湿性来料检验项 + 供应商质量评级
+容量衰减,首效偏低_SEI不致密,活性锂损失,scada.query_equipment_timeseries,"{""process"": ""化成"", ""sensor_tags"": [""formation_efficiency""]}",formation_efficiency,<,0.88,0.5,优化化成首充小电流台阶，提升 SEI 致密度,化成工艺 DOE，锁定首效最优窗口
+容量衰减,正极结构衰退,__ROOT__,,{},,,,1.0,,
+容量衰减,正极材料批次问题,正极结构衰退,lims.query_material_test,"{""material"": ""NCM""}",ncm_capacity_mah_g,<,195.0,0.6,隔离该 NCM 批次，调取来料 COA 复检克容量,提高正极材料克容量来料抽检频次
+容量衰减,过充导致晶格塌陷,正极结构衰退,scada.query_equipment_timeseries,"{""process"": ""化成"", ""sensor_tags"": [""charge_voltage_upper""]}",charge_voltage_upper,>,4.25,0.4,下调充电截止电压至体系上限以内,
+容量衰减,内阻增长,__ROOT__,,{},,,,1.0,,
+容量衰减,极片粘接失效,内阻增长,lims.query_process_test,"{""process"": ""辊压"", ""metric"": ""peel_strength_n_m""}",peel_strength_n_m,<,8.0,0.6,复核辊压压力与粘结剂比例，复测剥离强度,辊压工序加剥离强度抽检
+容量衰减,集流体腐蚀,内阻增长,lims.query_material_test,"{""material"": ""电解液"", ""metric"": ""acidity_hf_ppm""}",acidity_hf_ppm,>,50.0,0.4,检测电解液 HF 含量，更换合格批次,

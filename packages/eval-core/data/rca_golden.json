@@ -1,0 +1,74 @@
+{
+  "cases": [
+    {
+      "case_id": "RCA-001",
+      "root_cause": "涂布 → N/P 比偏低",
+      "expected_substrings": ["N/P", "涂布"],
+      "defect_type": "lithium_plating",
+      "min_evidence": 1
+    },
+    {
+      "case_id": "RCA-002",
+      "root_cause": "负极涂布面密度不均 → 局部析锂",
+      "expected_substrings": ["涂布", "面密度", "析锂"],
+      "defect_type": "容量衰减",
+      "min_evidence": 2
+    },
+    {
+      "case_id": "RCA-003",
+      "root_cause": "注液量偏差导致电解液不足 → 内阻偏高",
+      "expected_substrings": ["注液", "电解液", "内阻"],
+      "defect_type": "内阻高",
+      "min_evidence": 2
+    },
+    {
+      "case_id": "RCA-004",
+      "root_cause": "卷绕张力波动 → 极片错位",
+      "expected_substrings": ["卷绕", "张力", "错位"],
+      "defect_type": "short_circuit",
+      "min_evidence": 2
+    },
+    {
+      "case_id": "RCA-005",
+      "root_cause": "搅拌分散不均 → 导电剂团聚 → 局部内阻增大",
+      "expected_substrings": ["搅拌", "分散", "内阻"],
+      "defect_type": "内阻高",
+      "min_evidence": 1
+    },
+    {
+      "case_id": "RCA-006",
+      "root_cause": "涂布烘箱温度偏高 → 粘结剂迁移 → 容量衰减",
+      "expected_substrings": ["烘箱", "温度", "容量"],
+      "defect_type": "容量衰减",
+      "min_evidence": 2
+    },
+    {
+      "case_id": "RCA-007",
+      "root_cause": "来料 NCM 正极克容量偏低",
+      "expected_substrings": ["来料", "NCM", "克容量"],
+      "defect_type": "capacity_low",
+      "min_evidence": 1
+    },
+    {
+      "case_id": "RCA-008",
+      "root_cause": "电解液水分超标 → HF 腐蚀正极",
+      "expected_substrings": ["电解液", "水分", "HF"],
+      "defect_type": "容量衰减",
+      "min_evidence": 2
+    },
+    {
+      "case_id": "RCA-009",
+      "root_cause": "辊压过压 → 孔隙率不足 → 内阻增大",
+      "expected_substrings": ["辊压", "孔隙率", "内阻"],
+      "defect_type": "内阻高",
+      "min_evidence": 2
+    },
+    {
+      "case_id": "RCA-010",
+      "root_cause": "分切毛刺超标 → 隔膜刺穿 → 微短路",
+      "expected_substrings": ["分切", "毛刺", "短路"],
+      "defect_type": "short_circuit",
+      "min_evidence": 2
+    }
+  ]
+}

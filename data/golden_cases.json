@@ -1,0 +1,269 @@
+{
+  "schema_version": "1.1",
+  "description": "锂电制造 Golden Case 库 — 覆盖匀浆→化成分容全工序",
+  "cases": [
+    {
+      "case_id": "GC-8D-001",
+      "defect_type": "lithium_plating",
+      "defect_type_zh": "锂析出",
+      "process": "涂布",
+      "severity": "critical",
+      "root_cause": "N/P 比偏低（负极面密度小于工艺下限），导致负极容量不足以容纳正极脱出的锂离子，局部锂析出",
+      "capa_highlight": "调整涂布补偿系数 +0.5μm，加强首件面密度检测频次至每卷3点",
+      "symptoms": "负极表面银白色斑点，容量衰减 >8%，3C 循环后鼓包",
+      "detection_method": "SEM 观察 + EDS 成分分析 + 容量微分曲线 (dQ/dV)",
+      "fmea_causes": [
+        "浆料粘度偏低→涂布面密度偏薄",
+        "N/P 比设定未考虑来料批次波动"
+      ],
+      "effect_verification": "补偿后连续 20 卷面密度 Cpk 从 0.8 提升至 1.33，锂析出归零",
+      "updated_at": "2026-03-15T10:00:00Z"
+    },
+    {
+      "case_id": "GC-8D-002",
+      "defect_type": "capacity_fade",
+      "defect_type_zh": "容量衰减",
+      "process": "化成",
+      "severity": "high",
+      "root_cause": "化成曲线参数不当：恒流充电截止电压偏低 + 搁置时间不足，SEI 膜形成不完整，首周不可逆容量损失增大",
+      "capa_highlight": "优化化成曲线：恒流截止电压从 3.65V → 3.75V，搁置时间从 10min → 20min",
+      "symptoms": "分容容量低于设计值 5%-8%，首效偏低 2%-3%",
+      "detection_method": "化成数据分析 + 三电极拆解对比 SEI 膜厚度",
+      "fmea_causes": [
+        "化成柜温控偏差 > ±3℃",
+        "老化房温度不均匀 > 5℃",
+        "充电策略未按电芯体系优化"
+      ],
+      "effect_verification": "优化后首效从 86% 提升至 88.5%，批次容量变异系数 CV 从 3.2% 降至 1.8%",
+      "updated_at": "2026-04-02T14:30:00Z"
+    },
+    {
+      "case_id": "GC-8D-003",
+      "defect_type": "coating_uneven",
+      "defect_type_zh": "涂布不均匀",
+      "process": "涂布",
+      "severity": "high",
+      "root_cause": "模头垫片磨损导致唇口间隙左右不一致，浆料流量分布不均，幅宽方向面密度偏差超标",
+      "capa_highlight": "更换模头垫片并校准唇口间隙为 0.5±0.02mm；增加涂布面密度在线检测闭环",
+      "symptoms": "面密度幅宽方向偏差 > ±2.5%，极片两侧厚度差异明显",
+      "detection_method": "面密度在线检测仪横向扫描 + 模头间隙塞尺检查",
+      "fmea_causes": [
+        "模头垫片使用周期超限",
+        "浆料过滤不彻底→颗粒物堵塞唇口局部"
+      ],
+      "effect_verification": "更换后幅宽面密度偏差降至 ±1.0%，Cpk 从 0.6 回升至 1.25",
+      "updated_at": "2026-03-28T09:15:00Z"
+    },
+    {
+      "case_id": "GC-8D-004",
+      "defect_type": "coating_uneven",
+      "defect_type_zh": "涂布不均匀（周期性）",
+      "process": "涂布",
+      "severity": "medium",
+      "root_cause": "涂布背辊轴承磨损导致辊面跳动 >0.05mm，产生周期性浆料厚度波动",
+      "capa_highlight": "更换背辊轴承，建立辊子振动在线监测（阈值 0.03mm）",
+      "symptoms": "面密度呈周期性波动，周期与背辊转速一致，振幅 ±3%",
+      "detection_method": "频谱分析 FFT 确认波动频率 = 背辊基频",
+      "fmea_causes": [
+        "背辊轴承润滑不足",
+        "辊面跳动超差"
+      ],
+      "effect_verification": "更换轴承后 FFT 基频消失，面密度 CV 从 4.5% 降至 1.2%",
+      "updated_at": "2026-05-10T16:00:00Z"
+    },
+    {
+      "case_id": "GC-8D-005",
+      "defect_type": "internal_short_circuit",
+      "defect_type_zh": "内短路",
+      "process": "卷绕",
+      "severity": "critical",
+      "root_cause": "卷绕过程中极片边缘毛刺 >15μm 刺穿隔膜，隔膜边缘对齐度偏差 >0.5mm",
+      "capa_highlight": "优化切刀更换周期（从 50000 次缩短至 30000 次），增加隔膜对齐度 CCD 在线检测",
+      "symptoms": "电芯自放电率 >15%/月，DV(dV/dQ)曲线在 3.8V 处出现异常峰",
+      "detection_method": "自放电筛选 + DV 曲线分析 + X-ray 透视确认",
+      "fmea_causes": [
+        "切刀钝化→极片毛刺超标",
+        "卷绕张力波动→隔膜跑偏",
+        "极片粉尘脱落→贯穿隔膜"
+      ],
+      "effect_verification": "切刀更换周期优化后，毛刺 >15μm 比例从 3.2% 降至 0.15%，内短路率下降 95%",
+      "updated_at": "2026-01-20T11:00:00Z"
+    },
+    {
+      "case_id": "GC-8D-006",
+      "defect_type": "welding_spatter",
+      "defect_type_zh": "焊渣飞溅",
+      "process": "极耳焊接",
+      "severity": "high",
+      "root_cause": "激光焊接参数偏移：峰值功率过高 + 离焦量不匹配，导致熔池不稳定产生飞溅焊渣",
+      "capa_highlight": "重新标定激光功率（由 2.5kW → 2.2kW），优化离焦量至 +1.5mm，增加焊前清洁度检查",
+      "symptoms": "极耳根部焊渣飞溅附着，内阻偏高波动 >20%，焊接拉伸强度低于标准",
+      "detection_method": "焊接过程功率波形监测 + 金相切片 + 拉伸力测试",
+      "fmea_causes": [
+        "激光器老化→功率输出不稳定",
+        "光纤端面污染→能量分布畸变",
+        "来料极耳表面氧化层过厚"
+      ],
+      "effect_verification": "调参后焊渣飞溅率从 4.5% 降至 0.2%，焊接强度 Cpk 从 0.7 升至 1.4",
+      "updated_at": "2026-04-18T13:45:00Z"
+    },
+    {
+      "case_id": "GC-8D-007",
+      "defect_type": "electrolyte_leakage",
+      "defect_type_zh": "注液量偏差",
+      "process": "注液",
+      "severity": "high",
+      "root_cause": "注液泵计量精度漂移（单向阀密封圈磨损），导致单电芯注液量偏少约 2.5g",
+      "capa_highlight": "更换注液泵密封组件，建立每日注液量校准 SOP（允许偏差 ±0.3g）",
+      "symptoms": "电芯注液量低于规格下限，循环寿命衰减加速，C80 循环次数降低约 30%",
+      "detection_method": "注液前后称重比对 + 泵频次-流量曲线校准",
+      "fmea_causes": [
+        "注液泵密封件磨损→内泄漏",
+        "注液压力波动 > ±5%",
+        "电解液管路排气不彻底"
+      ],
+      "effect_verification": "更换密封件并校准后，注液量 CPK 从 0.55 提升至 1.67",
+      "updated_at": "2026-05-22T08:30:00Z"
+    },
+    {
+      "case_id": "GC-8D-008",
+      "defect_type": "coating_uneven",
+      "defect_type_zh": "浆料分散不良",
+      "process": "匀浆",
+      "severity": "high",
+      "root_cause": "匀浆搅拌时间不足（实际搅拌 3h vs SOP 要求 4h），粘结剂未充分溶解分散，浆料团聚物粒径 >50μm",
+      "capa_highlight": "恢复搅拌时间至 4h+，增加浆料细度在线检测（粒度仪，阈值 ≤30μm）",
+      "symptoms": "涂布后极片表面可见颗粒状凸起，厚度 CV>4%，涂层附着力不足",
+      "detection_method": "浆料细度刮板检测 + 涂布面密度在线 CV 监控",
+      "fmea_causes": [
+        "班组长为赶产量缩短搅拌时间",
+        "搅拌桨叶磨损导致剪切力不足",
+        "粘结剂批次粘度波动大"
+      ],
+      "effect_verification": "恢复 SOP 搅拌时间后，浆料细度稳定在 ≤25μm，涂布 CV 降至 1.5%",
+      "updated_at": "2026-02-14T15:20:00Z"
+    },
+    {
+      "case_id": "GC-8D-009",
+      "defect_type": "adhesion_failure",
+      "defect_type_zh": "涂层附着力不良",
+      "process": "涂布",
+      "severity": "high",
+      "root_cause": "烘箱干燥速率过快：前段温度过高达 130℃，表面快速结膜后内部溶剂气胀，导致涂层与箔材剥离",
+      "capa_highlight": "调整烘箱温区曲线：前段 90℃→中段 110℃→后段 120℃，增加风速至 15m/s",
+      "symptoms": "极片折弯后涂层脱落，箔材裸露面积 >5%，面密度正常但粘接力 <10N/m",
+      "detection_method": "180°剥离力测试 + SEM 断面观察涂层-箔材界面",
+      "fmea_causes": [
+        "烘箱 PID 温控超前→实际温度超调",
+        "风嘴堵塞→对流换热不均",
+        "涂布速度与烘箱长度不匹配"
+      ],
+      "effect_verification": "优化温区后，180°剥离力从 8N/m 提升至 18N/m，折弯测试通过率 100%",
+      "updated_at": "2026-06-05T10:00:00Z"
+    },
+    {
+      "case_id": "GC-8D-010",
+      "defect_type": "capacity_fade",
+      "defect_type_zh": "循环寿命衰减（来料批次）",
+      "process": "来料检验",
+      "severity": "medium",
+      "root_cause": "正极材料批次间粒径 D50 从 12μm 偏移至 15μm，比表面积下降导致锂离子扩散路径变长，倍率性能劣化",
+      "capa_highlight": "增加来料粒度 100% 抽检（CPK 阈值≥1.33），建立供应商分级管理制度",
+      "symptoms": "同配方同工艺但批次间循环寿命差异 >15%，高倍率放电平台压降偏大",
+      "detection_method": "粒度分析 (Malvern) + BET 比表面积 + 扣电验证",
+      "fmea_causes": [
+        "供应商焙烧工艺波动",
+        "来料检验频次不足（仅每批次 1 次）"
+      ],
+      "effect_verification": "实施全检后，批次容量极差从 4.5% 降至 1.2%，退货率上升但电芯一致性改善",
+      "updated_at": "2026-04-28T11:10:00Z"
+    },
+    {
+      "case_id": "GC-8D-011",
+      "defect_type": "winding_deformation",
+      "defect_type_zh": "卷绕变形",
+      "process": "卷绕",
+      "severity": "medium",
+      "root_cause": "卷绕张力设定过小（7N vs 标准 10N），加上极片弹性模量偏大，卷芯内部应力释放后产生 S 形扭曲",
+      "capa_highlight": "恢复卷绕张力至 10N，增加卷芯直径在线监测（公差 ±0.3mm）",
+      "symptoms": "卷芯 S 形扭曲 >1mm，入壳困难，电芯厚度超标",
+      "detection_method": "卷芯外径千分尺 + 卷绕过程张力实时曲线",
+      "fmea_causes": [
+        "卷绕参数配方误加载（老版本模板）",
+        "张力传感器零点漂移"
+      ],
+      "effect_verification": "恢复张力后卷芯扭曲率从 5% 降至 0.3%，入壳一次良率从 92% 升至 99.2%",
+      "updated_at": "2026-05-30T09:00:00Z"
+    },
+    {
+      "case_id": "GC-8D-012",
+      "defect_type": "contamination",
+      "defect_type_zh": "极片异物污染",
+      "process": "分切",
+      "severity": "critical",
+      "root_cause": "分切刀架刀口铁屑脱落（刀架防护罩年久锈蚀），铁粉 >200μm 嵌入极片涂层中",
+      "capa_highlight": "更换不锈钢刀架防护罩，增加除铁装置（磁力过滤器强度提升至 12000 高斯）",
+      "symptoms": "电芯自放电异常，拆解发现黑点，EDS 检出 Fe 元素，微短路",
+      "detection_method": "X-ray 在线检测 + 电压降 K 值筛选 + 拆解 EDS 分析",
+      "fmea_causes": [
+        "分切刀架防护罩材质不耐腐蚀→锈蚀剥落",
+        "除铁器磁力衰减未定期标定",
+        "分切环境洁净度控制不足"
+      ],
+      "effect_verification": "防护罩升级 + 除铁强化后，异物短路率从 2.8% 降至 0.05%",
+      "updated_at": "2026-03-08T14:00:00Z"
+    },
+    {
+      "case_id": "GC-8D-013",
+      "defect_type": "lithium_plating",
+      "defect_type_zh": "低温析锂",
+      "process": "化成分容",
+      "severity": "critical",
+      "root_cause": "低温环境中（<5℃）以大倍率充电，锂离子在负极表面扩散速率不足导致析出金属锂",
+      "capa_highlight": "增加化成车间温控（目标 25±3℃），低温时段降倍率充电策略（C/3 → C/5）",
+      "symptoms": "低温批次日循环后容量跳水，拆解负极面有银白色锂金属光泽",
+      "detection_method": "环境温湿度监控追溯 + dQ/dV 曲线 + 拆解观察",
+      "fmea_causes": [
+        "化成车间空调故障→温度失控",
+        "充电策略未考虑环境温度补偿",
+        "冬季批次无差异化工艺"
+      ],
+      "effect_verification": "温控恢复后低温批次析锂归零，C80 循环寿命达标率从 60% 升至 98%",
+      "updated_at": "2026-01-10T08:00:00Z"
+    },
+    {
+      "case_id": "GC-8D-014",
+      "defect_type": "coating_uneven",
+      "defect_type_zh": "面密度头尾偏差",
+      "process": "涂布",
+      "severity": "medium",
+      "root_cause": "涂布启停段工艺参数补偿不当：螺杆泵滞后响应导致浆料流量在启动段偏大、停止段偏小",
+      "capa_highlight": "优化涂布头尾加速度曲线，引入螺杆泵前馈补偿（提前 300ms 升频）",
+      "symptoms": "批量极片头尾各 2m 范围内面密度超上限 / 下限",
+      "detection_method": "面密度在线数据切片分析（头/中/尾分段统计）",
+      "fmea_causes": [
+        "螺杆泵与涂布速度 PID 耦合不良",
+        "启动段浆料回抽量设定不当"
+      ],
+      "effect_verification": "前馈补偿后头尾废料长度从 50m/卷降至 8m/卷，面密度 Cpk 提升至 1.25",
+      "updated_at": "2026-06-12T16:30:00Z"
+    },
+    {
+      "case_id": "GC-8D-015",
+      "defect_type": "cell_thickness_超标",
+      "defect_type_zh": "电芯厚度超标",
+      "process": "装配",
+      "severity": "high",
+      "root_cause": "来料极片压实密度偏大（2.65g/cc vs 标准 2.55g/cc）加上入壳过盈量设计偏紧，导致电芯厚度整体超上限",
+      "capa_highlight": "修正辊压机压实参数至 2.55±0.02g/cc，入壳过盈量从 0.3mm 调至 0.2mm",
+      "symptoms": "电芯厚度 >规格上限，入壳后电池鼓胀变形",
+      "detection_method": "辊压后极片厚度在线测量 + 电芯厚度 post-check",
+      "fmea_causes": [
+        "辊压机间隙传感器未按期校准",
+        "来料涂布面密度偏上限+辊压参数未联动补偿"
+      ],
+      "effect_verification": "参数修正后电芯厚度 Cpk 从 0.4 升至 1.5，厚度不良率从 8% 降至 0.6%",
+      "updated_at": "2026-05-05T11:20:00Z"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+# Prompt 注册表 — 版本化管理 + Golden Set 绑定
+# 每个 prompt 包含：当前版本、历史版本、绑定的 Golden Set、评测指标
+# run_eval.py --prompt-regression 对比新旧版本在 Golden Set 上的表现
+
+prompts:
+  rca_planner:
+    description: RCA Agent Planner 节点 — NL→取证计划
+    current_version: "1.0"
+    versions:
+      "1.0":
+        file: "rca_planner_v1.0.md"
+        golden_set: "rca_planner_golden.jsonl"
+        metrics:
+          plan_validity: ">=0.90"
+          tool_selection_accuracy: ">=0.85"
+        changelog: "初始版本"
+
+  rca_reflector:
+    description: RCA Agent Reflector 节点 — 证据验证 + 置信度 + 补查策略
+    current_version: "1.0"
+    versions:
+      "1.0":
+        file: "rca_reflector_v1.0.md"
+        golden_set: "rca_reflector_golden.jsonl"
+        metrics:
+          fmea_hit_rate: ">=0.80"
+          confidence_calibration: ">=0.75"
+        changelog: "初始版本"
+
+  rca_reporter:
+    description: RCA Agent Reporter 节点 — 8D 草稿生成
+    current_version: "1.0"
+    versions:
+      "1.0":
+        file: "rca_reporter_v1.0.md"
+        golden_set: "rca_reporter_golden.jsonl"
+        metrics:
+          d4_locked: "=1.0"
+          report_structure: ">=0.95"
+        changelog: "初始版本"
+
+  reporter_deep_agent:
+    description: Reporter Agent 主 Agent — 8D 定稿
+    current_version: "1.0"
+    versions:
+      "1.0":
+        file: "reporter_system_v1.0.md"
+        golden_set: "reporter_golden.json"
+        metrics:
+          d4_locked: "=1.0"
+          d5_actionable: ">=0.80"
+        changelog: "初始版本"
+
+  planner_react:
+    description: Planner Agent ReAct — NL→playbook
+    current_version: "1.0"
+    versions:
+      "1.0":
+        file: "planner_react_v1.0.md"
+        golden_set: "planner_golden.jsonl"
+        metrics:
+          playbook_accuracy: ">=0.90"
+          batch_id_extraction: ">=0.85"
+        changelog: "初始版本"

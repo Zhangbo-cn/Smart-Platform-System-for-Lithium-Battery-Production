@@ -1,0 +1,314 @@
+# 锂电智能化平台 — 全服务 Compose
+# =============================================================================
+# 一键启动:
+#   平台 + Agent:   docker compose -f deploy/docker-compose.platform.yml up -d
+#   平台 + Agent + MCP: docker compose -f deploy/docker-compose.platform.yml --profile mcp up -d
+#   仅基础设施:        docker compose -f deploy/docker-compose.platform.yml up -d redis postgres neo4j
+# =============================================================================
+
+version: "3.9"
+
+x-restart: &restart
+  restart: unless-stopped
+
+x-health-defaults: &health-defaults
+  interval: 15s
+  timeout: 5s
+  retries: 3
+
+# 所有 Agent/MCP 服务共享的 Docker 配置
+x-agent: &agent-base
+  build: .
+  volumes: ["..:/app"]
+  networks: [battery-net]
+
+# ---- 基础设施（5 个，always on）----------------------------------------------
+services:
+  redis:
+    <<: *restart
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "redis-cli", "ping"]
+    networks: [battery-net]
+
+  postgres:
+    <<: *restart
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: battery
+      POSTGRES_PASSWORD: battery
+      POSTGRES_DB: battery_agent
+    ports: ["5432:5432"]
+    volumes: ["pg-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U battery"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [battery-net]
+
+  neo4j:
+    <<: *restart
+    image: neo4j:5
+    environment:
+      NEO4J_AUTH: neo4j/neo4jneo4j
+    ports: ["7474:7474", "7687:7687"]
+    volumes: ["neo4j-data:/data"]
+    networks: [battery-net]
+
+  milvus:
+    <<: *restart
+    image: milvusdb/milvus:v2.4.0
+    ports: ["19530:19530", "9091:9091"]
+    environment:
+      ETCD_ENDPOINTS: milvus-etcd:2379
+      MINIO_ADDRESS: milvus-minio:9000
+    volumes: ["milvus-data:/var/lib/milvus"]
+    depends_on:
+      milvus-etcd: { condition: service_healthy }
+      milvus-minio: { condition: service_healthy }
+    command: ["milvus", "run", "standalone"]
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:9091/health"]
+    networks: [battery-net]
+
+  milvus-etcd:
+    <<: *restart
+    image: quay.io/coreos/etcd:v3.5.5
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_DATA_DIR: /etcd
+    command: ["etcd", "--advertise-client-urls", "http://0.0.0.0:2379", "--listen-client-urls", "http://0.0.0.0:2379", "--data-dir", "/etcd"]
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+    networks: [battery-net]
+
+  milvus-minio:
+    <<: *restart
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: ["minio", "server", "/data", "--console-address", ":9001"]
+    volumes: ["milvus-minio-data:/data"]
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:9000/minio/health/live"]
+    networks: [battery-net]
+
+  # ---- MCP 服务器（5 个，profile: mcp）---------------------------------------
+  # 注意：MCP Server 需要其 stub 代码在 services/mcp/ 下
+  mcp-mes:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/mcp
+    command: ["sh", "-c", "python -m mes_server.mes_server"]
+    ports: ["8101:8101"]
+    environment: { SERVICE_PORT: "8101" }
+    networks: [battery-net]
+
+  mcp-scada:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/mcp
+    command: ["sh", "-c", "python -m scada_server.scada_server"]
+    ports: ["8102:8102"]
+    environment: { SERVICE_PORT: "8102" }
+    networks: [battery-net]
+
+  mcp-erp:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/mcp
+    command: ["sh", "-c", "python -m erp_server.erp_server"]
+    ports: ["8103:8103"]
+    environment: { SERVICE_PORT: "8103" }
+    networks: [battery-net]
+
+  mcp-lims:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/mcp
+    command: ["sh", "-c", "python -m lims_server.lims_server"]
+    ports: ["8104:8104"]
+    environment: { SERVICE_PORT: "8104" }
+    networks: [battery-net]
+
+  mcp-qms:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/mcp
+    command: ["sh", "-c", "python -m qms_server.qms_server"]
+    ports: ["8105:8105"]
+    environment: { SERVICE_PORT: "8105" }
+    networks: [battery-net]
+
+  mcp-knowledge:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/mcp
+    command: ["sh", "-c", "python -m knowledge_server.knowledge_server"]
+    ports: ["8106:8106"]
+    environment:
+      SERVICE_PORT: "8106"
+      MILVUS_HOST: "milvus"
+      MILVUS_PORT: "19530"
+      NEO4J_URI: "bolt://neo4j:7687"
+      NEO4J_USER: "neo4j"
+      NEO4J_PASSWORD: "neo4jneo4j"
+      PYTHONPATH: /app/services/mcp:/app/packages/harness-core/src
+    depends_on:
+      neo4j: { condition: service_started }
+    networks: [battery-net]
+
+  # ---- 控制面（4 个）---------------------------------------------------------
+  capability-registry:
+    <<: [*restart, *agent-base]
+    working_dir: /app/services/capability-registry
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8021 --log-level warning"]
+    ports: ["8021:8021"]
+    environment: { SERVICE_PORT: "8021" }
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:8021/health"]
+    networks: [battery-net]
+
+  planner:
+    <<: [*restart, *agent-base]
+    working_dir: /app/services/planner-agent
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8011 --log-level warning"]
+    ports: ["8011:8011"]
+    environment:
+      SERVICE_PORT: "8011"
+      PYTHONPATH: /app/services/planner-agent:/app/packages/platform-contracts/src:/app/packages/harness-core/src
+    env_file: ["../services/planner-agent/.env"]
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:8011/health"]
+    networks: [battery-net]
+
+  orchestrator:
+    <<: [*restart, *agent-base]
+    working_dir: /app/services/orchestrator
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8020 --log-level warning"]
+    ports: ["8020:8020"]
+    environment:
+      SERVICE_PORT: "8020"
+      triage_agent_url: "http://triage-agent:8001"
+      trace_worker_url: "http://trace-worker:8002"
+      rca_agent_url: "http://rca-agent:8003"
+      report_8d_worker_url: "http://reporter-agent:8004"
+      report_reporter_agent_url: "http://reporter-agent:8004"
+      registry_url: "http://capability-registry:8021"
+      redis_url: "redis://redis:6379/0"
+      context_backend: "redis"
+      event_backend: "redis"
+    depends_on:
+      redis: { condition: service_healthy }
+      capability-registry: { condition: service_started }
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:8020/health"]
+    networks: [battery-net]
+
+  triage-agent:
+    <<: [*restart, *agent-base]
+    working_dir: /app/services/a2a_server/triage-agent
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8001 --log-level warning"]
+    ports: ["8001:8001"]
+    environment:
+      SERVICE_PORT: "8001"
+      PYTHONPATH: /app/services/a2a_server/triage-agent:/app/packages/platform-contracts/src:/app/packages/harness-core/src
+    env_file: ["../services/a2a_server/triage-agent/.env"]
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:8001/health"]
+    networks: [battery-net]
+
+  client-gateway:
+    <<: [*restart, *agent-base]
+    working_dir: /app/services/client-gateway
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8010 --log-level warning"]
+    ports: ["8010:8010"]
+    environment:
+      SERVICE_PORT: "8010"
+      orchestrator_url: "http://orchestrator:8020"
+      planner_url: "http://planner:8011"
+      rca_agent_url: "http://rca-agent:8003"
+    depends_on:
+      orchestrator: { condition: service_started }
+      planner: { condition: service_started }
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:8010/health"]
+    networks: [battery-net]
+
+  # ---- 业务 Agent（3 个）------------------------------------------------------
+  trace-worker:
+    <<: [*restart, *agent-base]
+    working_dir: /app/services/a2a_server/trace_worker
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8002 --log-level warning"]
+    ports: ["8002:8002"]
+    environment:
+      SERVICE_PORT: "8002"
+      PYTHONPATH: /app/services/a2a_server/trace_worker:/app/packages/platform-contracts/src:/app/packages/harness-core/src
+      mcp_mes_url: "http://mcp-mes:8101/sse"
+      mcp_scada_url: "http://mcp-scada:8102/sse"
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:8002/health"]
+    networks: [battery-net]
+
+  rca-agent:
+    <<: [*restart, *agent-base]
+    # RCA Agent 代码在姊妹仓 Battery_Agent_DS，通过 junction 链接到
+    # services/a2a_server/rca-agent。若目录不存在，启动时跳过此服务:
+    #   docker compose -f deploy/docker-compose.platform.yml up -d --scale rca-agent=0
+    working_dir: /app/services/a2a_server/rca-agent
+    command: ["sh", "-c", "python -m uvicorn api.main:app --host 0.0.0.0 --port 8003 --log-level warning"]
+    ports: ["8003:8003"]
+    environment:
+      SERVICE_PORT: "8003"
+      PYTHONPATH: /app/services/a2a_server/rca-agent:/app/packages/platform-contracts/src:/app/packages/harness-core/src
+      mcp_mes_url: "http://mcp-mes:8101/sse"
+      mcp_scada_url: "http://mcp-scada:8102/sse"
+      mcp_erp_url: "http://mcp-erp:8103/sse"
+      mcp_lims_url: "http://mcp-lims:8104/sse"
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:8003/health"]
+    networks: [battery-net]
+
+  reporter-agent:
+    <<: [*restart, *agent-base]
+    working_dir: /app/services/a2a_server/report-agent
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8004 --log-level warning"]
+    ports: ["8004:8004"]
+    environment:
+      SERVICE_PORT: "8004"
+      PYTHONPATH: /app/services/a2a_server/report-agent:/app/packages/platform-contracts/src:/app/packages/harness-core/src
+      mcp_qms_url: "http://mcp-qms:8105/sse"
+      mcp_knowledge_url: "http://mcp-knowledge:8106/sse"
+      reporter_mode: "deep_agent"
+    env_file: ["../services/a2a_server/report-agent/.env"]
+    healthcheck:
+      <<: *health-defaults
+      test: ["CMD", "curl", "-sf", "http://localhost:8004/health"]
+    networks: [battery-net]
+
+# ---- 网络 & 卷 ---------------------------------------------------------------
+networks:
+  battery-net:
+    driver: bridge
+
+volumes:
+  pg-data:
+  neo4j-data:
+  milvus-data:
+  milvus-minio-data:

@@ -1,0 +1,14 @@
+{
+  "items": [
+    {
+      "title": "涂布面密度异常处置 SOP",
+      "defect_types": ["lithium_plating", "capacity_fade"],
+      "body": "隔离可疑批次；复核涂布 N/P 比与面密度 Cpk；通知工艺工程师签核。"
+    },
+    {
+      "title": "化成容量衰减复测 SOP",
+      "defect_types": ["capacity_fade"],
+      "body": "抽取同配方对照组；LIMS 复测容量与内阻；更新 FMEA 命中项。"
+    }
+  ]
+}

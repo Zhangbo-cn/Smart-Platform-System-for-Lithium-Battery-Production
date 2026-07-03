@@ -1,0 +1,90 @@
+# Playbook 剧本配置 — 替代 orchestrator/app.py 的硬编码 if-else
+# 新增剧本只需加一条 YAML entry + 对应 Agent 的 AgentCard
+playbooks:
+  trace_only:
+    description: 批次查询
+    steps:
+      - step: trace
+        agent: trace-worker
+        required: true
+        context_write:
+          prior_evidence: "response.evidence"
+          prior_tool_calls: "response.tool_calls"
+
+  rca:
+    description: 单点根因分析
+    steps:
+      - step: trace
+        agent: trace-worker
+        condition: "batch_id"
+        context_write:
+          prior_evidence: "response.evidence"
+          prior_tool_calls: "response.tool_calls"
+      - step: rca
+        agent: quality-rca-agent
+        required: true
+        context_write:
+          rca.thread_id: "response.thread_id"
+          rca.root_cause: "response.root_cause"
+          rca.confidence: "response.confidence"
+
+  investigate:
+    description: 深度分析：分诊→追溯→RCA
+    steps:
+      - step: triage
+        agent: triage-agent
+        condition: "not skip_triage and not defect_type"
+        context_write:
+          defect_type: "result.defect_type"
+          severity: "result.severity"
+      - step: trace
+        agent: trace-worker
+        condition: "batch_id"
+        context_write:
+          prior_evidence: "response.evidence"
+          prior_tool_calls: "response.tool_calls"
+      - step: confirm_rca
+        type: input_required
+        condition: "not confirm_rca"
+        message: "请确认是否继续 RCA"
+      - step: rca
+        agent: quality-rca-agent
+        required: true
+        context_write:
+          rca.thread_id: "response.thread_id"
+          rca.root_cause: "response.root_cause"
+          rca.confidence: "response.confidence"
+        hitl_check:
+          field: "response.requires_hitl"
+          on_hitl: input_required
+
+  close_loop:
+    description: 质量闭环：RCA→8D→QMS
+    steps:
+      - step: triage
+        agent: triage-agent
+        condition: "not skip_triage and not defect_type"
+      - step: trace
+        agent: trace-worker
+        condition: "batch_id"
+      - step: rca
+        agent: quality-rca-agent
+        required: true
+        context_write:
+          rca.thread_id: "response.thread_id"
+          rca.root_cause: "response.root_cause"
+          rca.confidence: "response.confidence"
+        hitl_check:
+          field: "response.requires_hitl"
+          on_hitl: input_required
+        fallback:
+          on_empty: "root_cause"
+          on_failure: true
+      - step: report_8d
+        agent: report-reporter-agent
+        required: true
+        condition: "rca.root_cause"
+        context_write:
+          report_8d.report_md: "response.report_md"
+          report_8d.capa_id: "response.capa_id"
+          report_8d.qms_status: "response.qms_status"

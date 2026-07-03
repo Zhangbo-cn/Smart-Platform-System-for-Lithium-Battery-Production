@@ -1,0 +1,12 @@
+from enum import StrEnum
+
+
+class TaskState(StrEnum):
+  """对齐 docs/A2A_PROTOCOL.md §4。"""
+
+  SUBMITTED = "SUBMITTED"
+  RUNNING = "RUNNING"
+  INPUT_REQUIRED = "INPUT_REQUIRED"
+  COMPLETED = "COMPLETED"
+  FAILED = "FAILED"
+  CANCELLED = "CANCELLED"

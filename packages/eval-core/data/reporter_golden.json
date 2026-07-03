@@ -1,0 +1,94 @@
+{
+  "cases": [
+    {
+      "case_id": "REP-001",
+      "root_cause": "涂布 → N/P 比偏低",
+      "defect_type": "lithium_plating",
+      "min_report_chars": 150
+    },
+    {
+      "case_id": "REP-002",
+      "root_cause": "化成 → 分容容量偏低",
+      "defect_type": "capacity_fade",
+      "min_report_chars": 150
+    },
+    {
+      "case_id": "REP-003",
+      "root_cause": "负极涂布面密度不均 → 局部析锂 → 容量衰减",
+      "defect_type": "容量衰减",
+      "min_report_chars": 200
+    },
+    {
+      "case_id": "REP-004",
+      "root_cause": "注液量偏差 +3.2% → 电解液浸润不足 → 内阻偏高",
+      "defect_type": "内阻高",
+      "min_report_chars": 180
+    },
+    {
+      "case_id": "REP-005",
+      "root_cause": "卷绕张力波动 ±8% → 极片错位 → 短路风险",
+      "defect_type": "short_circuit",
+      "min_report_chars": 180
+    },
+    {
+      "case_id": "REP-006",
+      "root_cause": "化成截止电压设置偏低 0.05V → SEI 膜形成不充分 → 循环寿命衰减",
+      "defect_type": "cycle_life",
+      "min_report_chars": 200
+    },
+    {
+      "case_id": "REP-007",
+      "root_cause": "搅拌工序浆料分散不均匀 → 导电剂团聚 → 局部内阻增大",
+      "defect_type": "内阻高",
+      "min_report_chars": 180
+    },
+    {
+      "case_id": "REP-008",
+      "root_cause": "涂布烘箱温度偏高 8°C → 粘结剂迁移 → 极片脆化 → 循环容量衰减",
+      "defect_type": "容量衰减",
+      "min_report_chars": 200
+    },
+    {
+      "case_id": "REP-009",
+      "root_cause": "来料 NCM 正极材料克容量偏低 3.5% → 整体容量不达标",
+      "defect_type": "capacity_low",
+      "min_report_chars": 180
+    },
+    {
+      "case_id": "REP-010",
+      "root_cause": "辊压压力偏高导致极片过压 → 孔隙率不足 → 电解液浸润困难 → 内阻增大",
+      "defect_type": "内阻高",
+      "min_report_chars": 200
+    },
+    {
+      "case_id": "REP-011",
+      "root_cause": "分切毛刺超标 15μm → 隔膜刺穿风险 → 微短路",
+      "defect_type": "short_circuit",
+      "min_report_chars": 170
+    },
+    {
+      "case_id": "REP-012",
+      "root_cause": "电解液水分超标 25ppm → HF 生成 → 正极材料腐蚀 → 容量快速衰减",
+      "defect_type": "容量衰减",
+      "min_report_chars": 200
+    },
+    {
+      "case_id": "REP-013",
+      "root_cause": "焊接虚焊 → 极耳接触电阻增大 → 发热 → 局部容量损失",
+      "defect_type": "capacity_low",
+      "min_report_chars": 180
+    },
+    {
+      "case_id": "REP-014",
+      "root_cause": "环境湿度超标 3 天未报警 → 极片吸潮 → 注液后产气 → 鼓胀",
+      "defect_type": "swelling",
+      "min_report_chars": 180
+    },
+    {
+      "case_id": "REP-015",
+      "root_cause": "隔膜热收缩率偏高 → 高温循环时隔膜闭孔 → 内阻急剧增大",
+      "defect_type": "cycle_life",
+      "min_report_chars": 190
+    }
+  ]
+}

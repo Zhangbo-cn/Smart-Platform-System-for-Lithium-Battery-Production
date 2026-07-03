@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+dist/
+*.egg-info/
+
+# Env
+.env
+.env.local
+
+# Logs
+*.log
+logs/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Junction target is sibling repo — do not ignore services/rca-agent if linked;
+# if accidentally copied, ignore local artifacts only:
+services/rca-agent/.env

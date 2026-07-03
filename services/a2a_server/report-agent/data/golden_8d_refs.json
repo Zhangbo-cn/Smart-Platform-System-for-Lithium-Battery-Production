@@ -1,0 +1,16 @@
+{
+  "cases": [
+    {
+      "case_id": "GC-8D-001",
+      "defect_type": "lithium_plating",
+      "root_cause": "涂布 → N/P 比偏低导致负极锂析出风险",
+      "capa_highlight": "调整涂布补偿系数并加强首件检验"
+    },
+    {
+      "case_id": "GC-8D-002",
+      "defect_type": "capacity_fade",
+      "root_cause": "化成 → 分容容量偏低",
+      "capa_highlight": "优化化成曲线并增加老化抽检频次"
+    }
+  ]
+}
