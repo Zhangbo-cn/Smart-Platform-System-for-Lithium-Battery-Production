@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import structlog
@@ -49,10 +50,22 @@ class AsyncA2AServer:
     2. 手动模式：直接 override handle_task(task) → Task
     """
 
-    def __init__(self, card: AgentCard) -> None:
+    def __init__(
+        self,
+        card: AgentCard,
+        *,
+        redis_url: str | None = None,
+        redis_ttl: int = 86_400,
+        event_callback: Callable[[dict[str, Any]], Awaitable[None]] | None = None,
+    ) -> None:
         self.card = card
+        self._redis_url = redis_url
+        self._redis_ttl = redis_ttl
+        self._event_callback = event_callback
         # session_id → thread_id 映射（用于 HITL resume）
+        # 当 redis_url 设置时使用 Redis，否则用内存 dict
         self._thread_map: dict[str, str] = {}
+        self._redis: object | None = None  # lazy init
 
     # =========================================================================
     #  LangGraph hooks — 子类 override 这些即可自动获得完整 A2A 生命周期
@@ -88,11 +101,78 @@ class AsyncA2AServer:
         """
         return graph_state
 
+    async def _ensure_redis(self) -> object | None:
+        """惰性初始化 Redis 连接。"""
+        if self._redis is not None:
+            return self._redis
+        if not self._redis_url:
+            return None
+        try:
+            import redis.asyncio as redis_mod  # type: ignore[import-untyped]
+
+            self._redis = await redis_mod.from_url(self._redis_url, decode_responses=True)
+            return self._redis
+        except Exception:
+            logger.warning("a2a.redis_unavailable", url=self._redis_url)
+            self._redis = False  # 标记不可用，下次跳过
+            return None
+
+    async def _redis_get_thread(self, session_id: str) -> str | None:
+        r = await self._ensure_redis()
+        if r is None:
+            return None
+        try:
+            val = await r.get(f"thread_map:{session_id}")  # type: ignore[union-attr]
+            return val
+        except Exception:
+            return None
+
+    async def _redis_set_thread(self, session_id: str, thread_id: str) -> None:
+        r = await self._ensure_redis()
+        if r is None:
+            return
+        try:
+            await r.setex(f"thread_map:{session_id}", self._redis_ttl, thread_id)  # type: ignore[union-attr]
+        except Exception:
+            pass
+
+    async def _redis_del_thread(self, session_id: str) -> None:
+        r = await self._ensure_redis()
+        if r is None:
+            return
+        try:
+            await r.delete(f"thread_map:{session_id}")  # type: ignore[union-attr]
+        except Exception:
+            pass
+
     def _thread_id_for(self, session_id: str) -> str:
-        """获取或创建 session_id 对应的 LangGraph thread_id。"""
+        """获取或创建 session_id 对应的 LangGraph thread_id（内存快捷路径）。"""
         if session_id not in self._thread_map:
             self._thread_map[session_id] = f"lg_{session_id}_{uuid.uuid4().hex[:8]}"
         return self._thread_map[session_id]
+
+    async def _athread_id_for(self, session_id: str) -> str:
+        """获取 session_id 对应的 thread_id。内存优先，Redis 兜底恢复。
+
+        重启后首次调用：查 Redis → 未命中则新建。
+        """
+        if session_id in self._thread_map:
+            return self._thread_map[session_id]
+        # 尝试从 Redis 恢复（服务器重启后 session 仍在等待 HITL）
+        tid = await self._redis_get_thread(session_id)
+        if tid:
+            self._thread_map[session_id] = tid
+            return tid
+        # 新建
+        tid = f"lg_{session_id}_{uuid.uuid4().hex[:8]}"
+        self._thread_map[session_id] = tid
+        await self._redis_set_thread(session_id, tid)
+        return tid
+
+    async def _aclear_thread(self, session_id: str) -> None:
+        """清理 session 的 thread 映射（内存 + Redis）。"""
+        self._thread_map.pop(session_id, None)
+        await self._redis_del_thread(session_id)
 
     # =========================================================================
     #  handle_task — 默认实现：LangGraph 自动生命周期
@@ -110,7 +190,7 @@ class AsyncA2AServer:
 
         payload = self.payload_from_task(task)
         session_id = str(task.session_id or task.id or uuid.uuid4().hex[:12])
-        thread_id = self._thread_id_for(session_id)
+        thread_id = await self._athread_id_for(session_id)
 
         try:
             graph_input = await self.build_input(payload, session_id)
@@ -122,25 +202,62 @@ class AsyncA2AServer:
         if self.checkpointer is not None:
             config["configurable"]["checkpointer"] = self.checkpointer
 
-        try:
-            result = await self.graph.ainvoke(graph_input, config)
-        except Exception as exc:
-            # 检测是否为 LangGraph interrupt() 触发的中断
-            if self._is_graph_interrupt(exc):
-                logger.info(
-                    "a2a.graph_interrupted",
+        # ---- streaming 分支 ----
+        is_stream = bool((task.metadata or {}).get("stream"))
+        if is_stream and self.graph is not None and hasattr(self.graph, "astream_events"):
+            logger.info(
+                "a2a.graph_streaming",
+                agent=self.card.name, session_id=session_id, thread_id=thread_id,
+            )
+            try:
+                last_state = None
+                async for event in self.graph.astream_events(graph_input, config, version="v2"):
+                    if self._event_callback:
+                        await self._event_callback(event)
+                    if event.get("event") == "on_chain_end" and "output" in event.get("data", {}):
+                        last_state = event["data"]["output"]
+                if last_state is None:
+                    raise RuntimeError("streaming finished without final state")
+                result = last_state
+            except Exception as exc:
+                if self._is_graph_interrupt(exc):
+                    logger.info("a2a.graph_interrupted", agent=self.card.name, session_id=session_id, thread_id=thread_id)
+                    return self._interrupted_task(task, exc, thread_id)
+                logger.exception("a2a.graph_stream_failed", agent=self.card.name, error=str(exc))
+                return self.complete_task(task, {"error": str(exc)}, state=TaskState.FAILED)
+        else:
+            # ---- 非 streaming：原 graph.ainvoke ----
+            try:
+                result = await self.graph.ainvoke(graph_input, config)
+            except Exception as exc:
+                # 检测是否为 LangGraph interrupt() 触发的中断
+                if self._is_graph_interrupt(exc):
+                    logger.info(
+                        "a2a.graph_interrupted",
+                        agent=self.card.name,
+                        session_id=session_id,
+                        thread_id=thread_id,
+                    )
+                    return self._interrupted_task(task, exc, thread_id)
+                logger.exception(
+                    "a2a.graph_invoke_failed",
                     agent=self.card.name,
                     session_id=session_id,
-                    thread_id=thread_id,
+                    error=str(exc),
                 )
-                return self._interrupted_task(task, exc, thread_id)
-            logger.exception(
-                "a2a.graph_invoke_failed",
-                agent=self.card.name,
-                session_id=session_id,
-                error=str(exc),
+                return self.complete_task(task, {"error": str(exc)}, state=TaskState.FAILED)
+
+        # ---- __interrupt__ 返回值检测（兼容新版 LangGraph 不抛异常的模式） ----
+        if isinstance(result, dict) and result.get("__interrupt__"):
+            logger.info(
+                "a2a.graph_interrupted_via_result",
+                agent=self.card.name, session_id=session_id, thread_id=thread_id,
             )
-            return self.complete_task(task, {"error": str(exc)}, state=TaskState.FAILED)
+
+            class _MockInterrupt:
+                value = result["__interrupt__"]
+
+            return self._interrupted_task(task, _MockInterrupt(), thread_id)
 
         try:
             output = await self.extract_output(result)
@@ -150,7 +267,7 @@ class AsyncA2AServer:
 
         task = self.complete_task(task, output, state=TaskState.COMPLETED)
         # 清理 thread 映射（已完成，不需要 resume）
-        self._thread_map.pop(session_id, None)
+        await self._aclear_thread(session_id)
         return task
 
     # =========================================================================
@@ -228,7 +345,7 @@ class AsyncA2AServer:
             logger.exception("a2a.resume_extract_failed", thread_id=thread_id, error=str(exc))
             output = {"error": str(exc)}
 
-        self._thread_map.pop(task_id, None)
+        await self._aclear_thread(task_id)
         return output, TaskState.COMPLETED
 
     @staticmethod

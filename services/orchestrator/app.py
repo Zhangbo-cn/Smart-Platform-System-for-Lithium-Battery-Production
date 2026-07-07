@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Literal
 
@@ -25,6 +26,7 @@ from platform_contracts.agent_handoffs import RcaInvokeRequest, Report8dRequest
 from platform_contracts.agent_network import AgentNetwork
 from platform_contracts.agent_registry_seed import ALL_REGISTERED_AGENT_CARDS, ORCHESTRATOR_CARD
 from platform_contracts.platform_context import PlatformContext
+from platform_contracts.smart_router import SmartRouter
 from platform_contracts.triage_stub import resolve_triage
 from platform_contracts.task_events import TaskEventType
 from platform_contracts.task_state import TaskState
@@ -41,8 +43,14 @@ class OrchestratorSettings(BaseSettings):
     report_8d_worker_url: str = "http://127.0.0.1:8004"
     report_reporter_agent_url: str = "http://127.0.0.1:8004"
     registry_url: str = "http://127.0.0.1:8021"
+    planner_url: str = "http://127.0.0.1:8011"
     http_timeout: float = 120.0
     enable_dynamic_discovery: bool = True
+    enable_smart_routing: bool = False
+    smart_routing_confidence_threshold: float = 0.8
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = "deepseek-chat"
     http_retries: int = 2
     internal_service_key: str = "dev-router-key"
     sse_heartbeat_interval: float = 15.0
@@ -110,6 +118,8 @@ _sessions: SessionStore = build_session_store(
 
 # Playbook DSL 引擎（替代硬编码 if-else）
 _playbook_engine: PlaybookEngine | None = None
+# 智能路由
+_smart_router: SmartRouter | None = None
 
 
 class DispatchRequest(BaseModel):
@@ -148,10 +158,21 @@ class AsyncDispatchResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _playbook_engine, _discovered_cards
+    global _playbook_engine, _discovered_cards, _smart_router
     init_event_bus(settings.event_backend, redis_url=settings.redis_url)
     _playbook_engine = PlaybookEngine(Path(__file__).parent.parent.parent / "config" / "playbooks.yaml")
     _playbook_engine.load()
+
+    # 初始化智能路由（仅 enabled 时才创建 LLM client）
+    if settings.enable_smart_routing:
+        net = _agent_network()
+        _smart_router = SmartRouter(
+            net,
+            llm_base_url=settings.llm_base_url,
+            llm_api_key=settings.llm_api_key,
+            llm_model=settings.llm_model,
+        )
+        logger.info("router.smart_routing_enabled", agent_count=len(net.list_all()))
     # 从 Registry 动态发现 Agent
     _discovered_cards = await _discover_from_registry()
     logger.info(
@@ -520,24 +541,52 @@ async def _run_playbook(
 
         # ---- call_step 回调：将 engine 的"调 agent"映射到实际 A2A 调用 ----
         async def _call_step(agent_name: str, step_def: dict, engine_ctx: dict) -> dict:
-            if agent_name in ("triage-stub", "triage-agent"):
+            # 智能路由：LLM 建议替换 agent（仅 enable_smart_routing 时生效）
+            resolved_name = agent_name
+            router = _smart_router
+            if router and settings.enable_smart_routing:
+                suggested_name, confidence, reasoning = await router.suggest(
+                    playbook=req.playbook,
+                    current_step=agent_name,
+                    default_agent=agent_name,
+                    completed_steps=list(ctx.artifacts.get("completed_steps", [])),
+                    defect_type=ctx.defect_type or "",
+                    severity=ctx.severity or "medium",
+                    batch_id=ctx.batch_id or "",
+                    user_query=req.message or "",
+                )
+                if (suggested_name != agent_name
+                    and confidence >= settings.smart_routing_confidence_threshold):
+                    logger.info(
+                        "router.rerouted",
+                        from_agent=agent_name, to=suggested_name,
+                        confidence=confidence, reasoning=reasoning,
+                    )
+                    resolved_name = suggested_name
+
+            # 记录已完成步骤（供后续路由参考）
+            completed = list(ctx.artifacts.get("completed_steps", []))
+            completed.append(resolved_name)
+            ctx.artifacts["completed_steps"] = completed
+
+            if resolved_name in ("triage-stub", "triage-agent"):
                 await _apply_triage(delegator, ctx, req, session_id, trace_id)
                 return {
                     "defect_type": ctx.defect_type or "",
                     "severity": ctx.severity or "medium",
                 }
 
-            if agent_name == "trace-worker":
+            if resolved_name == "trace-worker":
                 await _run_trace(delegator, ctx, req, session_id, trace_id)
                 return {
                     "evidence": list(ctx.prior_evidence),
                     "tool_calls": list(ctx.prior_tool_calls),
                 }
 
-            if agent_name == "quality-rca-agent":
+            if resolved_name == "quality-rca-agent":
                 return await _run_rca(delegator, ctx, req, session_id, trace_id)
 
-            if agent_name == "report-reporter-agent":
+            if resolved_name == "report-reporter-agent":
                 hitl_approved = req.hitl_approved or bool(
                     engine_ctx.get("hitl_approved", False)
                 )
@@ -545,7 +594,20 @@ async def _run_playbook(
                     delegator, ctx, session_id, trace_id, hitl_approved=hitl_approved,
                 )
 
-            raise ValueError(f"Unknown agent: {agent_name}")
+            # 智能路由建议了未知 agent → 退回原始
+            if resolved_name != agent_name:
+                logger.warning("router.unknown_agent_fallback", name=resolved_name, fallback=agent_name)
+
+            # 确保原始 agent 也有对应的处理分支
+            if agent_name == "trace-worker":
+                await _run_trace(delegator, ctx, req, session_id, trace_id)
+                return {"evidence": list(ctx.prior_evidence), "tool_calls": list(ctx.prior_tool_calls)}
+            if agent_name == "quality-rca-agent":
+                return await _run_rca(delegator, ctx, req, session_id, trace_id)
+            if agent_name == "report-reporter-agent":
+                return await _run_report_8d(delegator, ctx, session_id, trace_id, hitl_approved=False)
+
+            raise ValueError(f"Unknown agent: {resolved_name}")
 
         # ---- emit_event 回调：将引擎事件转为 SSE 推送 ----
         async def _emit_event(event_type: str, step: str, agent: str, message: str) -> None:

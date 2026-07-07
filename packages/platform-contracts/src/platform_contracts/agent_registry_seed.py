@@ -193,7 +193,7 @@ QUALITY_PRED_AGENT_CARD = AgentCard(
     capabilities=["spc_alarm", "defect_trend"],
     mcp_servers=["mes", "scada", "lims"],
     allowed_tools=allowed_tools_for("quality-prediction-agent"),
-    enabled=False,
+    enabled=True,
 )
 
 PATROL_AGENT_CARD = AgentCard(
@@ -203,7 +203,7 @@ PATROL_AGENT_CARD = AgentCard(
     capabilities=["patrol_summary"],
     mcp_servers=["mes", "scada"],
     allowed_tools=allowed_tools_for("patrol-agent"),
-    enabled=False,
+    enabled=True,
 )
 
 PROCESS_AGENT_CARD = AgentCard(
@@ -213,7 +213,7 @@ PROCESS_AGENT_CARD = AgentCard(
     capabilities=["process_optimization", "parameter_recommendation"],
     mcp_servers=["mes", "scada", "knowledge"],
     allowed_tools=allowed_tools_for("process-optimization-agent"),
-    enabled=False,
+    enabled=True,
 )
 
 EQUIPMENT_AGENT_CARD = AgentCard(
@@ -223,7 +223,7 @@ EQUIPMENT_AGENT_CARD = AgentCard(
     capabilities=["predictive_maintenance", "equipment_telemetry"],
     mcp_servers=["scada", "eam"],
     allowed_tools=allowed_tools_for("equipment-health-agent"),
-    enabled=False,
+    enabled=True,
 )
 
 WMS_AGENT_CARD = AgentCard(
@@ -233,7 +233,7 @@ WMS_AGENT_CARD = AgentCard(
     capabilities=["inventory_query", "material_trace"],
     mcp_servers=["wms", "erp"],
     allowed_tools=allowed_tools_for("wms-supply-agent"),
-    enabled=False,
+    enabled=True,
 )
 
 SAFETY_AGENT_CARD = AgentCard(
@@ -243,7 +243,7 @@ SAFETY_AGENT_CARD = AgentCard(
     capabilities=["emergency_stop", "parameter_write_approval"],
     mcp_servers=["plc", "mes", "qms"],
     allowed_tools=allowed_tools_for("safety-agent"),
-    enabled=False,
+    enabled=True,
 )
 
 RCA_INTERFACE_AGENTS: list[AgentCard] = [

@@ -30,7 +30,7 @@ MCP_SERVER_TOOLS: dict[str, dict[str, dict[str, object]]] = {
         },
         "get_shift_summary": {
             "description": "开班巡线摘要",
-            "status": "planned",
+            "status": "implemented",
             "sensitive": False,
         },
     },
@@ -80,7 +80,7 @@ MCP_SERVER_TOOLS: dict[str, dict[str, dict[str, object]]] = {
         },
         "search_sop": {
             "description": "SOP/作业指导书",
-            "status": "in_process",
+            "status": "implemented",
             "sensitive": False,
             "note": "当前为关键词匹配，P2 升级语义搜索",
         },
@@ -112,37 +112,37 @@ MCP_SERVER_TOOLS: dict[str, dict[str, dict[str, object]]] = {
     "wms": {
         "get_inventory": {
             "description": "库存查询",
-            "status": "planned",
+            "status": "implemented",
             "sensitive": False,
         },
         "trace_material_location": {
             "description": "物料库位追溯",
-            "status": "planned",
+            "status": "implemented",
             "sensitive": False,
         },
     },
     "eam": {
         "get_maintenance_log": {
             "description": "维保记录",
-            "status": "planned",
+            "status": "implemented",
             "sensitive": False,
         },
         "get_work_orders": {
             "description": "工单列表",
-            "status": "planned",
+            "status": "implemented",
             "sensitive": False,
         },
     },
     "plc": {
         "emergency_stop": {
             "description": "紧急停线",
-            "status": "planned",
+            "status": "implemented",
             "sensitive": True,
             "exclusive_agent": "safety-agent",
         },
         "write_setpoint": {
             "description": "写 PLC 设定值",
-            "status": "planned",
+            "status": "implemented",
             "sensitive": True,
             "exclusive_agent": "safety-agent",
         },

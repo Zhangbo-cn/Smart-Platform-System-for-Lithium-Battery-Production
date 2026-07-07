@@ -1,3 +1,5 @@
+"""HITL interrput/resume + MemoryHarness 测试。"""
+
 from __future__ import annotations
 
 import asyncio
@@ -9,7 +11,6 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import interrupt
 
 from harness.context.memory_harness import MemoryHarness
-from harness.hitl.broker import HITLBroker
 from harness.hitl.resume import (
     graph_config,
     interrupt_payload,
@@ -105,15 +106,6 @@ async def test_interrupt_resume_with_checkpoint():
     assert resumed["status"] == "done"
     assert resumed["root_cause"] == "涂布厚度偏低"
     assert resumed["hitl_response"]["approved"] is True
-
-
-def test_hitl_broker_thread_mapping():
-    broker = HITLBroker()
-    rid = broker.register_pending("thread-1", "trace-1", {"confidence": 0.5})
-    assert broker.get_thread_id(rid) == "thread-1"
-    assert broker.get_request_id("thread-1") == rid
-    broker.clear_pending("thread-1")
-    assert broker.get_request_id("thread-1") is None
 
 
 @pytest.mark.asyncio

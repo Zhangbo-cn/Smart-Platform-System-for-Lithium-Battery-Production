@@ -1,4 +1,5 @@
-from harness.hitl.broker import HITLBroker, HITLRequest, HITLResponse
+"""HITL 辅助函数（保留 resume.py 用于测试引用）。"""
+
 from harness.hitl.resume import (
     extract_interrupt,
     graph_config,
@@ -8,9 +9,6 @@ from harness.hitl.resume import (
 )
 
 __all__ = [
-    "HITLBroker",
-    "HITLRequest",
-    "HITLResponse",
     "extract_interrupt",
     "graph_config",
     "interrupt_payload",

@@ -1,0 +1,38 @@
+[
+  {
+    "case_id": "PLN-001",
+    "user_query": "涂布面密度偏差±2%，批次B20260630，请分析",
+    "expected_playbook": "investigate",
+    "expected_params": {"batch_id": "B20260630", "defect_type": "coating_density_low"}
+  },
+  {
+    "case_id": "PLN-002",
+    "user_query": "批次B20260630的追溯信息",
+    "expected_playbook": "trace_only",
+    "expected_params": {"batch_id": "B20260630"}
+  },
+  {
+    "case_id": "PLN-003",
+    "user_query": "内阻高根因分析",
+    "expected_playbook": "rca",
+    "expected_params": {"defect_type": "ir_high"}
+  },
+  {
+    "case_id": "PLN-004",
+    "user_query": "容量衰减，需要追溯、根因分析和8D报告",
+    "expected_playbook": "close_loop",
+    "expected_params": {"defect_type": "capacity_low"}
+  },
+  {
+    "case_id": "PLN-005",
+    "user_query": "帮我查一下B20260630批次的涂布参数",
+    "expected_playbook": "trace_only",
+    "expected_params": {"batch_id": "B20260630"}
+  },
+  {
+    "case_id": "PLN-006",
+    "user_query": "产线一最近有什么异常？简单看看",
+    "expected_playbook": "investigate",
+    "expected_params": {"factory_id": "产线一"}
+  }
+]

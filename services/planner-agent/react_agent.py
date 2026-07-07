@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any
 
 import httpx
 import structlog
+from langsmith import traceable
+from langsmith.run_trees import RunTree
 
 from platform_contracts.plan_result import PlanParams, PlanResult, PlannerRequest
 from plan_engine import plan as rule_plan
@@ -44,6 +47,7 @@ def _llm_configured(settings: PlannerSettings) -> bool:
     return bool(settings.llm_base_url.strip() and settings.llm_api_key.strip())
 
 
+@traceable(run_type="llm", name="planner_chat_completion")
 async def _chat_completion(
     settings: PlannerSettings,
     messages: list[dict[str, Any]],
@@ -61,7 +65,8 @@ async def _chat_completion(
     async with httpx.AsyncClient(timeout=settings.http_timeout) as client:
         resp = await client.post(url, json=payload, headers=headers)
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+    return data
 
 
 def _plan_from_submit(plan_dict: dict[str, Any]) -> PlanResult:

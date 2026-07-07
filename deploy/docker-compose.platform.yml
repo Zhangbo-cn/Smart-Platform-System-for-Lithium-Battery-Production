@@ -167,6 +167,33 @@ services:
       neo4j: { condition: service_started }
     networks: [battery-net]
 
+  mcp-eam:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/mcp
+    command: ["sh", "-c", "python -m eam_server.eam_server"]
+    ports: ["8107:8107"]
+    environment: { SERVICE_PORT: "8107" }
+    networks: [battery-net]
+
+  mcp-wms:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/mcp
+    command: ["sh", "-c", "python -m wms_server.wms_server"]
+    ports: ["8108:8108"]
+    environment: { SERVICE_PORT: "8108" }
+    networks: [battery-net]
+
+  mcp-plc:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/mcp
+    command: ["sh", "-c", "python -m plc_server.plc_server"]
+    ports: ["8110:8110"]
+    environment: { SERVICE_PORT: "8110" }
+    networks: [battery-net]
+
   # ---- 控制面（4 个）---------------------------------------------------------
   capability-registry:
     <<: [*restart, *agent-base]
@@ -207,14 +234,92 @@ services:
       report_reporter_agent_url: "http://reporter-agent:8004"
       registry_url: "http://capability-registry:8021"
       redis_url: "redis://redis:6379/0"
-      context_backend: "redis"
-      event_backend: "redis"
-    depends_on:
-      redis: { condition: service_healthy }
-      capability-registry: { condition: service_started }
-    healthcheck:
-      <<: *health-defaults
-      test: ["CMD", "curl", "-sf", "http://localhost:8020/health"]
+
+  patrol-agent:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/a2a_server/patrol-agent
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8005"]
+    ports: ["8005:8005"]
+    environment:
+      SERVICE_PORT: "8005"
+      PYTHONPATH: /app/services/a2a_server/patrol-agent:/app/packages/platform-contracts/src:/app/packages/harness-core/src
+      mcp_mes_url: "http://mcp-mes:8101/sse"
+      mcp_scada_url: "http://mcp-scada:8102/sse"
+      registry_url: "http://capability-registry:8021"
+    networks: [battery-net]
+
+  process-optimization-agent:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/a2a_server/process-optimization-agent
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8202"]
+    ports: ["8202:8202"]
+    environment:
+      SERVICE_PORT: "8202"
+      PYTHONPATH: /app/services/a2a_server/process-optimization-agent:/app/packages/platform-contracts/src:/app/packages/harness-core/src
+      mcp_mes_url: "http://mcp-mes:8101/sse"
+      mcp_scada_url: "http://mcp-scada:8102/sse"
+      mcp_knowledge_url: "http://mcp-knowledge:8106/sse"
+      registry_url: "http://capability-registry:8021"
+    networks: [battery-net]
+
+  equipment-health-agent:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/a2a_server/equipment-health-agent
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8203"]
+    ports: ["8203:8203"]
+    environment:
+      SERVICE_PORT: "8203"
+      PYTHONPATH: /app/services/a2a_server/equipment-health-agent:/app/packages/platform-contracts/src:/app/packages/harness-core/src
+      mcp_scada_url: "http://mcp-scada:8102/sse"
+      mcp_eam_url: "http://mcp-eam:8107/sse"
+      registry_url: "http://capability-registry:8021"
+    networks: [battery-net]
+
+  wms-supply-agent:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/a2a_server/wms-supply-agent
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8204"]
+    ports: ["8204:8204"]
+    environment:
+      SERVICE_PORT: "8204"
+      PYTHONPATH: /app/services/a2a_server/wms-supply-agent:/app/packages/platform-contracts/src:/app/packages/harness-core/src
+      mcp_wms_url: "http://mcp-wms:8108/sse"
+      mcp_erp_url: "http://mcp-erp:8103/sse"
+      registry_url: "http://capability-registry:8021"
+    networks: [battery-net]
+
+  safety-agent:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/a2a_server/safety-agent
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8099"]
+    ports: ["8099:8099"]
+    environment:
+      SERVICE_PORT: "8099"
+      PYTHONPATH: /app/services/a2a_server/safety-agent:/app/packages/platform-contracts/src:/app/packages/harness-core/src
+      mcp_plc_url: "http://mcp-plc:8110/sse"
+      mcp_mes_url: "http://mcp-mes:8101/sse"
+      mcp_qms_url: "http://mcp-qms:8105/sse"
+      registry_url: "http://capability-registry:8021"
+    networks: [battery-net]
+
+  quality-prediction-agent:
+    <<: [*restart, *agent-base]
+    profiles: ["mcp"]
+    working_dir: /app/services/a2a_server/quality-prediction-agent
+    command: ["sh", "-c", "python -m uvicorn app:app --host 0.0.0.0 --port 8201"]
+    ports: ["8201:8201"]
+    environment:
+      SERVICE_PORT: "8201"
+      PYTHONPATH: /app/services/a2a_server/quality-prediction-agent:/app/packages/platform-contracts/src:/app/packages/harness-core/src
+      mcp_mes_url: "http://mcp-mes:8101/sse"
+      mcp_scada_url: "http://mcp-scada:8102/sse"
+      mcp_lims_url: "http://mcp-lims:8104/sse"
+      registry_url: "http://capability-registry:8021"
     networks: [battery-net]
 
   triage-agent:
@@ -280,6 +385,7 @@ services:
       mcp_scada_url: "http://mcp-scada:8102/sse"
       mcp_erp_url: "http://mcp-erp:8103/sse"
       mcp_lims_url: "http://mcp-lims:8104/sse"
+      registry_url: "http://capability-registry:8021"
     healthcheck:
       <<: *health-defaults
       test: ["CMD", "curl", "-sf", "http://localhost:8003/health"]

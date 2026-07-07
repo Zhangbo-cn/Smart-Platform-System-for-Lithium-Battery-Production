@@ -1,0 +1,32 @@
+[
+  {
+    "case_id": "ORC-001",
+    "playbook": "close_loop",
+    "expected_steps": ["triage", "trace", "rca", "report_8d"],
+    "input": {"defect_type": "coating_density_low", "batch_id": "B20260630"}
+  },
+  {
+    "case_id": "ORC-002",
+    "playbook": "investigate",
+    "expected_steps": ["triage", "trace", "rca"],
+    "input": {"defect_type": "内阻高", "batch_id": "B20260630", "confirm_rca": true}
+  },
+  {
+    "case_id": "ORC-003",
+    "playbook": "trace_only",
+    "expected_steps": ["trace"],
+    "input": {"batch_id": "B20260630"}
+  },
+  {
+    "case_id": "ORC-004",
+    "playbook": "rca",
+    "expected_steps": ["trace", "rca"],
+    "input": {"defect_type": "short_circuit", "batch_id": "B001"}
+  },
+  {
+    "case_id": "ORC-005",
+    "playbook": "close_loop",
+    "expected_steps": ["triage", "trace", "rca", "report_8d"],
+    "input": {"defect_type": "容量衰减", "batch_id": "B20260630", "hitl_approved": false}
+  }
+]

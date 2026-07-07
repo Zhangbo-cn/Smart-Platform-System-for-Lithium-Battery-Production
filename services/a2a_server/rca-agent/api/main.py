@@ -1,37 +1,349 @@
+"""RCA Agent：A2A + LangGraph 根因分析 — AsyncA2AServer 统一适配。"""
+
 from __future__ import annotations
 
 import asyncio
+import json
 from contextlib import asynccontextmanager
 from typing import Any
 
 import structlog
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from python_a2a import Task
+from python_a2a import Task, TaskState as A2ATaskState, TaskStatus
 
-from api.a2a_hitl import a2a_feedback_to_hitl, analysis_status_to_task_state
+from agent.graphs import build_quality_analysis_graph
+from agent.tools.bootstrap import bootstrap_registry
+from agent.tools.registry import ToolRegistry
 from api.auth import TokenPayload, decode_token
-from api.handlers import run_hitl_resolve, run_quality_analysis, shutdown_services, startup_services
-from api.schemas import AnalysisRequest, AnalysisResponse, HITLResolveRequest
-from harness_core.a2a import mount_a2a, result_to_task
+from api.handlers import prior_evidence_items, prior_tool_records
+from api.schemas import AnalysisResponse, AnalysisRequest, HITLResolveRequest
+from api.tracing import build_langsmith_callbacks
+from config import get_settings
+from harness.checkpoint import build_checkpointer
+from harness_core.agent_bootstrap import register_with_registry
+from harness_core.audit.tracer import new_trace_id, set_trace_id
+from harness_core.permission.checker import PermissionChecker
+from harness.context.memory_harness import MemoryHarness
+from knowledge.fmea_registry import FMEARegistry
+from langgraph.types import Command as LangGraphCommand
+from platform_contracts.a2a_server import AsyncA2AServer
 from platform_contracts.agent_card import RCA_AGENT_CARD
 from platform_contracts.task_state import TaskState
 
 logger = structlog.get_logger(__name__)
 
 
+# ── RcaAgentServer — A2A + LangGraph ───────────────────────────────
+
+
+class RcaAgentServer(AsyncA2AServer):
+    """RCA Agent 服务器。
+
+    build_input → [handle_task 自动: graph.ainvoke → interrupt 捕获] → extract_output
+
+    与 AsyncA2AServer 的区别：
+    - build_input 中注入 memory_context + 转换 prior_evidence
+    - handle_task 覆写加入超时 + memory.persist
+    - extract_output 包装为 AnalysisResponse 格式
+    """
+
+    def __init__(
+        self,
+        card,
+        memory: MemoryHarness,
+        registry: ToolRegistry,
+        graph,
+        *,
+        checkpointer=None,
+        redis_url: str | None = None,
+    ) -> None:
+        super().__init__(card, redis_url=redis_url)
+        self._memory = memory
+        self._registry = registry
+        self._graph = graph
+        self._checkpointer = checkpointer
+        # A2A 路径的默认用户（REST 路径从 JWT 获取）
+        self.default_user_id: str = "rca-agent"
+        self.default_user_role: str = "quality_manager"
+
+    # ── AsyncA2AServer 覆写 ──
+
+    @property
+    def graph(self):
+        return self._graph
+
+    @property
+    def checkpointer(self):
+        return self._checkpointer
+
+    async def build_input(self, payload: dict[str, Any], session_id: str) -> dict[str, Any]:
+        """A2A 载荷 → LangGraph 初始状态。"""
+        req = AnalysisRequest(**payload)
+        trace_id = new_trace_id()
+        set_trace_id(trace_id)
+
+        memory_context = await self._memory.build_planner_context(
+            session_id=session_id,
+            user_id=payload.get("user_id", self.default_user_id),
+            query=req.user_query,
+            defect_type=req.defect_type,
+        )
+        if req.batch_id:
+            memory_context = f"【目标批次】{req.batch_id}\n\n{memory_context}"
+
+        return {
+            "trace_id": trace_id,
+            "session_id": session_id,
+            "user_id": payload.get("user_id", self.default_user_id),
+            "user_role": payload.get("user_role", self.default_user_role),
+            "user_query": req.user_query,
+            "batch_id": req.batch_id or "",
+            "defect_type": req.defect_type or "",
+            "memory_context": memory_context,
+            "prior_tool_calls": prior_tool_records(req.prior_tool_calls),
+            "evidence": prior_evidence_items(req.prior_evidence),
+            "tool_calls": prior_tool_records(req.prior_tool_calls),
+        }
+
+    async def extract_output(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        """LangGraph 最终状态 → AnalysisResponse 格式。"""
+        evidence_raw = graph_state.get("evidence", []) or []
+        evidence_out = [
+            {
+                "description": ev.get("description", ""),
+                "source_tool": ev.get("source_tool", ""),
+                "data_ref": ev.get("data_ref", ""),
+                "confidence": ev.get("confidence", 0.0),
+            }
+            for ev in evidence_raw
+        ]
+        trace_id = graph_state.get("trace_id", graph_state.get("session_id", ""))
+        thread_id = graph_state.get("session_id", trace_id)
+        requires_hitl = graph_state.get("requires_hitl", False)
+        return {
+            "trace_id": trace_id,
+            "thread_id": thread_id,
+            "status": "hitl" if requires_hitl else "done",
+            "root_cause": graph_state.get("root_cause", ""),
+            "recommendations": graph_state.get("recommendations", []),
+            "confidence": graph_state.get("confidence", 0.0),
+            "report_md": graph_state.get("final_report", ""),
+            "requires_hitl": requires_hitl,
+            "evidence": evidence_out,
+            "rca_artifacts": graph_state.get("rca_artifacts"),
+        }
+
+    async def handle_task(self, task: Task) -> Task:
+        """覆写 handle_task：LangGraph __interrupt__ 检测（非异常）+ 超时 + memory.persist。"""
+        payload = self.payload_from_task(task)
+        session_id = str(task.session_id or task.id)
+        thread_id = await self._athread_id_for(session_id)
+
+        try:
+            graph_input = await self.build_input(payload, session_id)
+        except Exception as exc:
+            logger.exception("rca.build_input_failed", session_id=session_id, error=str(exc))
+            return self.complete_task(task, {"error": str(exc)}, state=TaskState.FAILED)
+
+        config = {"configurable": {"thread_id": thread_id}}
+        callbacks = build_langsmith_callbacks()
+        invoke_config = {**config, "recursion_limit": 50}
+        if callbacks:
+            invoke_config["callbacks"] = callbacks
+
+        try:
+            result = await asyncio.wait_for(
+                self.graph.ainvoke(graph_input, config=invoke_config),
+                timeout=300.0,
+            )
+        except asyncio.TimeoutError:
+            logger.error("rca.graph_timeout", session_id=session_id, thread_id=thread_id)
+            return self.complete_task(
+                task,
+                {
+                    "trace_id": session_id,
+                    "thread_id": thread_id,
+                    "status": "failed",
+                    "root_cause": "",
+                    "recommendations": [],
+                    "confidence": 0.0,
+                    "report_md": "RCA analysis timed out after 5 minutes",
+                    "requires_hitl": False,
+                    "evidence": [],
+                },
+                state=TaskState.FAILED,
+            )
+        except Exception as exc:
+            # LangGraph 抛出异常（非 __interrupt__ 路径，兜底）
+            logger.exception("rca.graph_invoke_failed", session_id=session_id, error=str(exc))
+            return self.complete_task(task, {"error": str(exc)}, state=TaskState.FAILED)
+
+        # ---- __interrupt__ 检测（RCA LangGraph 版本用返回值，非异常） ----
+        interrupts = (result or {}).get("__interrupt__")
+        if interrupts:
+            logger.info("rca.graph_interrupted", session_id=session_id, thread_id=thread_id)
+            interrupt_value = getattr(interrupts[0], "value", str(interrupts[0])) if interrupts else ""
+            task.artifacts = [
+                {
+                    "parts": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "thread_id": thread_id,
+                                    "session_id": session_id,
+                                    "interrupt_value": str(interrupt_value),
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    ]
+                }
+            ]
+            task.status = TaskStatus(state=A2ATaskState.INPUT_REQUIRED)
+            return task
+
+        # ---- 正常完成 ----
+        try:
+            await self._memory.persist_analysis(
+                thread_id,
+                graph_input.get("user_id", "rca-agent"),
+                graph_input.get("user_query", ""),
+                result,
+            )
+        except Exception as exc:
+            logger.warning("rca.memory_persist_failed", session_id=session_id, error=str(exc))
+
+        output = await self.extract_output(result)
+        task = self.complete_task(task, output, state=TaskState.COMPLETED)
+        await self._aclear_thread(session_id)
+        return task
+
+    async def handle_resume(
+        self,
+        task_id: str,
+        thread_id: str,
+        feedback: dict[str, Any],
+        _fwd: dict[str, str],
+    ) -> tuple[dict[str, Any], str]:
+        """覆写 handle_resume：__interrupt__ 检测 + 多层 HITL。"""
+        config = {"configurable": {"thread_id": thread_id}}
+        callbacks = build_langsmith_callbacks()
+        invoke_config = {**config, "recursion_limit": 50}
+        if callbacks:
+            invoke_config["callbacks"] = callbacks
+
+        try:
+            result = await asyncio.wait_for(
+                self.graph.ainvoke(
+                    LangGraphCommand(resume=feedback),
+                    config=invoke_config,
+                ),
+                timeout=300.0,
+            )
+        except asyncio.TimeoutError:
+            return {"status": "failed", "error": "HITL resume timed out"}, TaskState.FAILED
+        except Exception as exc:
+            logger.exception("rca.resume_failed", thread_id=thread_id, error=str(exc))
+            return {"error": str(exc)}, TaskState.FAILED
+
+        # 检测多层 HITL（resume 后又遇到 interrupt）
+        interrupts = (result or {}).get("__interrupt__")
+        if interrupts:
+            logger.info("rca.resume_re_interrupted", thread_id=thread_id, session_id=task_id)
+            interrupt_value = getattr(interrupts[0], "value", str(interrupts[0])) if interrupts else ""
+            task_obj = Task(id=task_id, session_id=task_id)
+            task_obj.artifacts = [
+                {
+                    "parts": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(
+                                {
+                                    "thread_id": thread_id,
+                                    "session_id": task_id,
+                                    "interrupt_value": str(interrupt_value),
+                                },
+                                ensure_ascii=False,
+                            ),
+                        }
+                    ]
+                }
+            ]
+            task_obj.status = TaskStatus(state=A2ATaskState.INPUT_REQUIRED)
+            return self._task_result(task_obj), TaskState.INPUT_REQUIRED
+
+        output = await self.extract_output(result)
+        await self._aclear_thread(task_id)
+        return output, TaskState.COMPLETED
+
+
+# ── 启动 / 关闭 ──────────────────────────────────────────────────────
+
+
+class AppServices:
+    registry: ToolRegistry
+    mcp_clients: list
+    memory: MemoryHarness
+    server: RcaAgentServer
+    mcp_connected: list[str]
+    mcp_failed: list[str]
+    checkpoint_backend: str
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.services = await startup_services()
-    logger.info(
-        "api.startup_complete",
-        mcp_connected=app.state.services.mcp_connected,
-        mcp_failed=app.state.services.mcp_failed,
+    settings = get_settings()
+    registry = ToolRegistry(permission_checker=PermissionChecker())
+    mcp_clients, connected, failed = await bootstrap_registry(registry)
+    memory = await MemoryHarness.create()
+    await FMEARegistry.load()
+    graph = build_quality_analysis_graph(registry, checkpointer=build_checkpointer())
+
+    redis_url = getattr(settings, "redis_url", None) or None
+
+    server = RcaAgentServer(
+        RCA_AGENT_CARD,
+        memory,
+        registry,
+        graph,
+        checkpointer=build_checkpointer(),
+        redis_url=redis_url,
     )
+
+    svc = AppServices()
+    svc.registry = registry
+    svc.mcp_clients = mcp_clients
+    svc.memory = memory
+    svc.server = server
+    svc.mcp_connected = connected
+    svc.mcp_failed = failed
+    svc.checkpoint_backend = settings.langgraph_checkpoint_backend
+    app.state.svc = svc
+    server.mount(app)
+
+    # 注册到 Capability Registry
+    await register_with_registry(
+        registry_url=settings.registry_url,
+        agent_name="quality-rca-agent",
+        agent_description=RCA_AGENT_CARD.description,
+        agent_url=f"http://localhost:{settings.api_port}",
+        capabilities=RCA_AGENT_CARD.capabilities,
+    )
+
+    logger.info(
+        "rca.startup",
+        mcp_connected=connected,
+        mcp_failed=failed,
+        checkpoint_backend=svc.checkpoint_backend,
+    )
+
     try:
         yield
     finally:
-        await shutdown_services(app.state.services)
+        for c in mcp_clients:
+            await c.close()
 
 
 app = FastAPI(title="quality-rca-agent", version="0.2.0", lifespan=lifespan)
@@ -50,97 +362,12 @@ def _principal_from_headers(fwd: dict[str, str]) -> TokenPayload:
         raise HTTPException(401, str(exc)) from exc
 
 
-async def _a2a_quality_handler(
-    payload: dict[str, Any],
-    schema: str | None,
-    fwd: dict[str, str],
-) -> tuple[dict[str, Any], str] | dict[str, Any]:
-    principal = _principal_from_headers(fwd)
-    trace = fwd.get("x-trace-id") or fwd.get("X-Trace-Id")
-    req = AnalysisRequest(**payload)
-    svc = app.state.services
-    try:
-        resp = await run_quality_analysis(
-            svc, req, user_id=principal.sub, user_role=principal.role, trace_id=trace,
-        )
-    except Exception as exc:
-        logger.exception("rca.analysis_failed", session_id=req.session_id, error=str(exc))
-        return {"error": str(exc), "root_cause": "", "confidence": 0.0}, TaskState.FAILED
-
-    task_id = req.session_id or resp.thread_id
-    if task_id:
-        state = analysis_status_to_task_state(resp.status)
-        task = Task(id=task_id, session_id=task_id)
-        result_to_task(task, resp.model_dump(mode="json"), state=state)
-        svc.a2a_tasks.save(task_id=task_id, task_dict=task.to_dict(), analysis=resp, status=state)
-    result = resp.model_dump(mode="json")
-    if resp.requires_hitl:
-        return result, TaskState.INPUT_REQUIRED
-    return result, TaskState.COMPLETED
-
-
-async def _a2a_resume_handler(
-    task_id: str,
-    thread_id: str,
-    feedback: dict[str, Any],
-    fwd: dict[str, str],
-) -> tuple[dict[str, Any], str] | dict[str, Any]:
-    principal = _principal_from_headers(fwd)
-    svc = app.state.services
-    stored = svc.a2a_tasks.get(task_id)
-    if stored is None:
-        raise HTTPException(404, f"task not found: {task_id}")
-    if stored.status != TaskState.INPUT_REQUIRED:
-        raise HTTPException(409, f"task {task_id} is not INPUT_REQUIRED")
-
-    resp = await run_hitl_resolve(
-        svc,
-        thread_id=thread_id,
-        request_id=stored.analysis.hitl_request_id,
-        user_id=principal.sub,
-        feedback=a2a_feedback_to_hitl(feedback),
-    )
-    state = analysis_status_to_task_state(resp.status)
-    task = Task(id=task_id, session_id=task_id)
-    result_to_task(task, resp.model_dump(mode="json"), state=state)
-    svc.a2a_tasks.save(
-        task_id=task_id,
-        task_dict=task.to_dict(),
-        analysis=resp,
-        status=state,
-    )
-    result = resp.model_dump(mode="json")
-    if resp.requires_hitl:
-        return result, TaskState.INPUT_REQUIRED
-    return result, TaskState.COMPLETED
-
-
-async def _a2a_task_lookup(task_id: str, _fwd: dict[str, str]) -> dict[str, Any] | None:
-    stored = app.state.services.a2a_tasks.get(task_id)
-    if stored is None:
-        return None
-    return stored.task_dict
-
-
-mount_a2a(
-    app,
-    RCA_AGENT_CARD,
-    _a2a_quality_handler,
-    resume_handler=_a2a_resume_handler,
-    task_lookup=_a2a_task_lookup,
-)
-
-
-def auth(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> TokenPayload:
-    try:
-        return decode_token(credentials.credentials)
-    except ValueError as exc:
-        raise HTTPException(401, str(exc)) from exc
+# ── 健康检查 ─────────────────────────────────────────────────────────
 
 
 @app.get("/health")
 async def health():
-    svc = app.state.services
+    svc = app.state.svc
     status = "ok" if not svc.mcp_failed else "degraded"
     return {
         "status": status,
@@ -151,24 +378,47 @@ async def health():
     }
 
 
+# ── REST 兼容端点（保留，非 A2A 路径仍可用）────────────────────────
+
+
+def auth(credentials: HTTPAuthorizationCredentials = Depends(bearer)) -> TokenPayload:
+    try:
+        return decode_token(credentials.credentials)
+    except ValueError as exc:
+        raise HTTPException(401, str(exc)) from exc
+
+
 @app.post("/v1/analysis/quality", response_model=AnalysisResponse)
 async def quality_analysis(
     req: AnalysisRequest,
     principal: TokenPayload = Depends(auth),
     x_trace_id: str | None = Header(default=None, alias="X-Trace-Id"),
 ) -> AnalysisResponse:
-    return await run_quality_analysis(
-        app.state.services,
-        req,
-        user_id=principal.sub,
-        user_role=principal.role,
-        trace_id=x_trace_id,
-    )
+    """REST 兼容入口；标准 A2A 请用 POST /a2a/v1/tasks/send。"""
+    svc = app.state.svc
+    payload = req.model_dump(mode="json")
+    payload["user_id"] = principal.sub
+    payload["user_role"] = principal.role
+
+    task = Task(id=req.session_id or new_trace_id(), session_id=req.session_id or new_trace_id())
+    out_task = await svc.server.handle_task(task)
+
+    for art in out_task.artifacts or []:
+        for part in art.get("parts", []):
+            if part.get("type") == "text" and part.get("text"):
+                import json
+                try:
+                    return AnalysisResponse(**json.loads(part["text"]))
+                except Exception:
+                    pass
+    raise HTTPException(500, "RCA analysis failed")
 
 
 @app.post("/v1/hitl/resolve", response_model=AnalysisResponse)
 async def hitl_resolve(req: HITLResolveRequest, principal: TokenPayload = Depends(auth)):
-    feedback: dict[str, Any] = {
+    """HITL 签核 REST 入口（兼容旧路径）。"""
+    svc = app.state.svc
+    feedback = {
         "approved": req.approved,
         "feedback": req.feedback,
         "reviewer_id": principal.sub,
@@ -180,25 +430,13 @@ async def hitl_resolve(req: HITLResolveRequest, principal: TokenPayload = Depend
     if req.extra:
         feedback.update(req.extra)
 
-    try:
-        return await run_hitl_resolve(
-            app.state.services,
-            thread_id=req.thread_id,
-            request_id=req.request_id,
-            user_id=principal.sub,
-            feedback=feedback,
-        )
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-
-
-if __name__ == "__main__":
-    import asyncio
-
-    import uvicorn
-    from config import get_settings
-
-    port = get_settings().api_port
-    config = uvicorn.Config(app, host="0.0.0.0", port=port)
-    server = uvicorn.Server(config)
-    asyncio.run(server.serve())
+    tid = req.thread_id or new_trace_id()
+    result, state = await svc.server.handle_resume(
+        task_id=tid,
+        thread_id=req.thread_id or tid,
+        feedback=feedback,
+        _fwd={},
+    )
+    if state in (TaskState.INPUT_REQUIRED, TaskState.FAILED):
+        raise HTTPException(400 if state == TaskState.INPUT_REQUIRED else 500, str(result.get("error", "")))
+    return AnalysisResponse(**result)

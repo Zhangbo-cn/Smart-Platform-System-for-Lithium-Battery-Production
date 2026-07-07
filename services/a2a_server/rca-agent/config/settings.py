@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     api_port: int = 8003
     internal_service_key: str | None = Field(default="dev-router-key")
     langgraph_checkpoint_backend: Literal["memory", "redis"] = "memory"
+    registry_url: str = "http://localhost:8021"
 
     @model_validator(mode="after")
     def _reject_insecure_prod_secrets(self) -> Self:

@@ -41,6 +41,7 @@ from platform_contracts.mcp_tool_matrix import (
     allowed_tools_for,
     tool_policies_for,
 )
+from platform_contracts.smart_router import SmartRouter
 from platform_contracts.platform_context import PlatformContext
 from platform_contracts.task_events import (
     TERMINAL_TASK_EVENTS,

@@ -7,7 +7,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("plc_server", host="0.0.0.0", port=8106)
+mcp = FastMCP("plc_server", host="0.0.0.0", port=8110)
 
 
 @mcp.tool()

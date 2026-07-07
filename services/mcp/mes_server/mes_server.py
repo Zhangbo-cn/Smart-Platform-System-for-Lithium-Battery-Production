@@ -65,5 +65,43 @@ async def get_process_params(
     }
 
 
+
+@mcp.tool()
+async def get_shift_summary(
+    line_id: str,
+    shift: str = "D",
+    date: str = "",
+) -> dict[str, Any]:
+    """获取线体开班巡线摘要：产量、良率、设备状态、异常事件。
+
+    Args:
+        line_id: 产线编号，如 LINE-1
+        shift: D=白班 N=夜班
+        date: 日期 YYYY-MM-DD，默认当天
+    """
+    from datetime import datetime, timezone
+    d = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return {
+        "line_id": line_id,
+        "date": d,
+        "shift": shift,
+        "production_qty": 4200,
+        "yield_rate_pct": 97.2,
+        "top_defects": [
+            {"defect": "capacity_low", "count": 15, "rate_pct": 0.36},
+            {"defect": "high_ir", "count": 8, "rate_pct": 0.19},
+        ],
+        "equipment_status": [
+            {"id": "MIX-01", "status": "running"},
+            {"id": "COAT-A2", "status": "running", "note": "刮刀剩余寿命 12h"},
+            {"id": "ROLL-03", "status": "idle"},
+        ],
+        "alarms": [
+            {"ts": f"{d}T08:15:00", "equipment": "COAT-A2", "type": "温度偏移", "severity": "warning"},
+        ],
+        "oee_pct": 85.3,
+    }
+
+
 if __name__ == "__main__":
     mcp.run(transport="sse")
