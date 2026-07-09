@@ -233,7 +233,7 @@ flowchart TB
 
 ## 5. 剧本与 Agent 调用序
 
-权威定义见 **[PLAYBOOK.md](./PLAYBOOK.md)**（6 剧本 + `task_type=rca` 快捷入口）。
+权威定义见 **[playbooks.yaml](../config/playbooks.yaml)**（6 剧本 + `task_type=rca` 快捷入口）。
 
 | playbook | 调用序列（逻辑） | 确认点 |
 |----------|------------------|--------|
