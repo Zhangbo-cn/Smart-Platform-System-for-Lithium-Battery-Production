@@ -12,12 +12,36 @@ docker compose -f deploy/docker-compose.platform.yml --profile mcp up -d
 # 另开终端起各服务 → 见 deploy/README.md
 ```
 
+## 测试
+
+```bash
+# 安装
+pip install -e packages/platform-contracts
+pip install -e packages/harness-core
+
+# 运行全部测试
+make test-all
+```
+
+**279+ 测试**覆盖全部服务模块。
+
 ## 仓库结构
 
 ```
-packages/   platform-contracts · harness-core
-services/   client-gateway · planner-agent · orchestrator · capability-registry · a2a_server/* · mcp
-deploy/     docker-compose.platform.yml
+packages/
+  platform-contracts/  AgentCard, A2A, ToolMeta, SmartRouter
+  harness-core/        ToolRegistry, DAGEngine, AuditTracer, OTel
+  eval-core/           评估框架
+
+services/
+  orchestrator/        Playbook 编排 + DAG 引擎
+  client-gateway/      用户门户
+  planner-agent/       LLM 意图识别
+  capability-registry/ 服务注册与健康探活
+  a2a_server/          领域 Agent（RCA, Report, Triage, Trace, Patrol...）
+  mcp/                 9 个 MCP 服务器
+
+deploy/                docker-compose.platform.yml
 docs/       文档导航 · REQUIREMENT_TEMPLATE
 scripts/    link-rca · setup-dev · start-mcp
 ```
