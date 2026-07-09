@@ -1,0 +1,23 @@
+# 日志配置
+version: 1
+
+formatters:
+  json:
+    format: "%(message)s"
+    class: pythonjsonlogger.jsonlogger.JsonFormatter
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: json
+    stream: ext://sys.stdout
+
+loggers:
+  harness_core:
+    level: INFO
+  uvicorn:
+    level: WARNING
+
+root:
+  level: INFO
+  handlers: [console]
