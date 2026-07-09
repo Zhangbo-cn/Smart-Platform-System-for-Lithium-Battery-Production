@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.12"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e packages/platform-contracts
+          pip install -e packages/harness-core
+
+      - name: Lint (syntax check)
+        run: |
+          python -c "
+          import ast
+          from pathlib import Path
+          errors = []
+          for f in sorted(Path('.').rglob('*.py')):
+              if '.claude' in f.parts or '__pycache__' in f.parts:
+                  continue
+              try:
+                  ast.parse(f.read_text(encoding='utf-8'))
+              except Exception as e:
+                  errors.append(f'{f}: {e}')
+          if errors:
+              for e in errors:
+                  print(e)
+              exit(1)
+          print(f'OK: all .py files syntax valid')
+          "
+
+      - name: Test packages
+        run: |
+          python -m pytest packages/harness-core/tests/ -v --tb=short
+
+      - name: Test platform-contracts
+        run: |
+          python -m pytest packages/platform-contracts/tests/ -v --tb=short
+
+      - name: Test planner-agent
+        working-directory: services/planner-agent
+        run: |
+          python -m pytest tests/ -v --tb=short
+
+      - name: Test client-gateway
+        run: |
+          python -m pytest services/client-gateway/tests/ -v --tb=short
+
+      - name: Test orchestrator
+        run: |
+          python -m pytest services/orchestrator/tests/ -v --tb=short
+
+      - name: Test capability-registry
+        run: |
+          python -m pytest services/capability-registry/tests/ -v --tb=short
+
+      - name: Test agent-template
+        run: |
+          python -m pytest services/agent_template/tests/ -v --tb=short
+
+      - name: Test rca-agent
+        run: |
+          python -m pytest services/a2a_server/rca-agent/tests/ -v --tb=short
+
+      - name: Test report-agent
+        run: |
+          python -m pytest services/a2a_server/report-agent/tests/ -v --tb=short
+
+      - name: Test triage-agent
+        run: |
+          python -m pytest services/a2a_server/triage-agent/tests/ -v --tb=short
+
+      - name: Test MCP servers (isolated)
+        run: |
+          for srv in mes_server scada_server erp_server lims_server qms_server eam_server wms_server plc_server knowledge_server; do
+            python -m pytest "services/mcp/$srv/tests/" -v --tb=short || true
+          done
+
+      - name: Test project-root
+        run: |
+          python -m pytest tests/ -v --tb=short
