@@ -1,0 +1,16 @@
+# 默认所有者
+* @Zhangbo-cn
+
+# 核心包
+/packages/ @Zhangbo-cn
+
+# 编排层
+/services/orchestrator/ @Zhangbo-cn
+/services/client-gateway/ @Zhangbo-cn
+
+# Agent
+/services/a2a_server/rca-agent/ @Zhangbo-cn
+/services/a2a_server/report-agent/ @Zhangbo-cn
+
+# CI/CD
+/.github/ @Zhangbo-cn
