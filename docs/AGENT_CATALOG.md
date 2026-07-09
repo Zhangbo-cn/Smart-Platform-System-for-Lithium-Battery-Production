@@ -1,6 +1,10 @@
 # Agent 能力目录与 PlatformContext
 
-> 协作协议：**A2A**（经 AgentRouter）· 数据访问：**MCP** · 个人负责范围见 **[AGENT_SCOPE.md](./AGENT_SCOPE.md)**
+> 注意：本文档为早期设计稿，部分内容已过时。
+> 最新架构请参考 [ARCHITECTURE_OVERVIEW.md](./ARCHITECTURE_OVERVIEW.md)。
+> 实际运行的 AgentCard 定义见 `platform_contracts/agent_registry_seed.py`。
+
+> 协作协议：**A2A**（经 Orchestrator）· 数据访问：**MCP** · AgentCard 见 `agent_registry_seed.py`
 
 ## 1. Agent 注册表（AgentCard）
 
