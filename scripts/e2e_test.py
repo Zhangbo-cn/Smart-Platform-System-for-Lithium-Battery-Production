@@ -23,6 +23,10 @@ SERVICES = {
     "mcp_erp":    ("python", "-m", "erp_server.erp_server"),
     "mcp_lims":   ("python", "-m", "lims_server.lims_server"),
     "mcp_qms":    ("python", "-m", "qms_server.qms_server"),
+    "mcp_knowledge": ("python", "-m", "knowledge_server.app"),
+    "mcp_eam":    ("python", "-m", "eam_server.eam_server"),
+    "mcp_wms":    ("python", "-m", "wms_server.wms_server"),
+    "mcp_plc":    ("python", "-m", "plc_server.plc_server"),
 }
 
 WORKERS = {
@@ -38,7 +42,7 @@ procs: list[subprocess.Popen] = []
 
 
 def start_mcp() -> None:
-    print("=== Starting 5 MCP servers ===")
+    print("=== Starting 9 MCP servers ===")
     for name, cmd in SERVICES.items():
         log = open(LOGS_DIR / f"mcp_{name}.log", "w")
         p = subprocess.Popen(
