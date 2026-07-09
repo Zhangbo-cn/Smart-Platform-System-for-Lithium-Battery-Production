@@ -11,10 +11,10 @@
 # 1. 构建基础镜像（首次 / requirements 变更后）
 docker build -t battery-agent-base .
 
-# 2. 启动平台 + 全部 Agent（11 服务）
+# 2. 启动平台 + 全部 Agent（13 服务）
 docker compose -f deploy/docker-compose.platform.yml up -d
 
-# 3. 如需 MCP 服务器（5 个），加 --profile
+# 3. 如需 MCP 服务器（9 个），加 --profile
 docker compose -f deploy/docker-compose.platform.yml --profile mcp up -d
 
 # 4. 查看状态
@@ -28,31 +28,45 @@ docker compose -f deploy/docker-compose.platform.yml ps
 | 基础设施 | redis | 6379 | — |
 | | postgres | 5432 | — |
 | | neo4j | 7474/7687 | — |
+| | milvus | 19530 | — |
 | 控制面 | capability-registry | 8021 | — |
 | | planner | 8011 | — |
 | | orchestrator | 8020 | — |
 | | client-gateway | 8010 | — |
-| 业务 Agent | trace-worker | 8002 | — |
+| 业务 Agent | triage-agent | 8001 | — |
+| | trace-worker | 8002 | — |
 | | rca-agent | 8003 | — |
 | | reporter-agent | 8004 | — |
+| | patrol-agent | 8005 | mcp |
+| | safety-agent | 8099 | mcp |
+| | quality-prediction | 8201 | mcp |
+| | process-optimization | 8202 | mcp |
+| | equipment-health | 8203 | mcp |
+| | wms-supply | 8204 | mcp |
 | MCP Server | mcp-mes | 8101 | mcp |
 | | mcp-scada | 8102 | mcp |
 | | mcp-erp | 8103 | mcp |
 | | mcp-lims | 8104 | mcp |
 | | mcp-qms | 8105 | mcp |
+| | mcp-knowledge | 8106 | mcp |
+| | mcp-eam | 8107 | mcp |
+| | mcp-wms | 8108 | mcp |
+| | mcp-plc | 8110 | mcp |
 
-**总计**：11 服务（默认）+ 5 MCP（`--profile mcp`）= 16 容器
+**总计**：13 服务（默认）+ 10 MCP（`--profile mcp`）= 23 容器
 
 ## 启动顺序
 
 ```
-redis / postgres / neo4j          ← 基础设施（health check 通过后）
+redis / postgres / neo4j / milvus       ← 基础设施
     ↓
-capability-registry / planner     ← 控制面
+capability-registry / planner           ← 控制面
     ↓
-orchestrator                      ← 依赖 registry + redis
+orchestrator                            ← 依赖 registry + redis
     ↓
-trace-worker / rca-agent / reporter-agent / client-gateway
+trace-worker / rca-agent / reporter-agent / client-gateway / triage-agent
+    ↓
+patrol / safety / prediction / optimization / equipment / wms  ← 领域 Agent
 ```
 
 ## 环境变量
@@ -60,8 +74,9 @@ trace-worker / rca-agent / reporter-agent / client-gateway
 | 服务 | .env 位置 | 关键变量 |
 |------|----------|---------|
 | planner | `services/planner-agent/.env` | `LLM_API_KEY`, `LLM_BASE_URL` |
-| reporter | `services/a2a_server/report-agent/.env` | `LLM_API_KEY`, `LLM_BASE_URL`, `REPORTER_MODE` |
+| reporter | `services/a2a_server/report-agent/.env` | `LLM_API_KEY`, `LLM_BASE_URL` |
 | rca-agent | `services/a2a_server/rca-agent/.env` | `LLM_API_KEY`, `LLM_BASE_URL` |
+| triage-agent | `services/a2a_server/triage-agent/.env` | `LLM_API_KEY`, `LLM_BASE_URL` |
 
 ## 竖切验证
 
@@ -84,16 +99,16 @@ curl http://127.0.0.1:8021/a2a/v1/agents
 ## 仅启动基础设施（开发时手动起 Agent）
 
 ```bash
-docker compose -f deploy/docker-compose.platform.yml up -d redis postgres neo4j
+docker compose -f deploy/docker-compose.platform.yml up -d redis postgres neo4j milvus milvus-etcd milvus-minio
 # 然后手动 uvicorn 各 Agent
 ```
 
-## RCA Agent 说明
+## 测试
 
-RCA Agent 代码在姊妹仓 `Battery_Agent_DS`，通过文件系统 junction 链接到
-`services/a2a_server/rca-agent`。Docker 需要该目录存在才能启动 rca-agent 容器。
-
-若无需 RCA，可跳过：
 ```bash
-docker compose -f deploy/docker-compose.platform.yml up -d --scale rca-agent=0
+# 安装后全量测试
+make test-all
+
+# 或逐模块测试
+python -m pytest packages/harness-core/tests/
 ```
