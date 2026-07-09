@@ -2,13 +2,17 @@
 
 一数据源一 Server；**业务 Agent 不内置 MCP 实现**，仅通过 `harness-core` 连接。
 
-| Server | 端口 | 模块 |
-|--------|------|------|
-| mes | 8101 | `mes_server.mes_server` |
-| scada | 8102 | `scada_server.scada_server` |
-| erp | 8103 | `erp_server.erp_server` |
-| lims | 8104 | `lims_server.lims_server` |
-| qms | 8105 | `qms_server.qms_server` |
+| Server | 端口 | 模块 | 数据源 |
+|--------|:----:|------|--------|
+| mes | 8101 | `mes_server.mes_server` | 生产执行 |
+| scada | 8102 | `scada_server.scada_server` | 设备监控 |
+| erp | 8103 | `erp_server.erp_server` | 企业资源 |
+| lims | 8104 | `lims_server.lims_server` | 实验室信息 |
+| qms | 8105 | `qms_server.qms_server` | 质量系统 |
+| knowledge | 8106 | `knowledge_server.app` | 混合检索(Neo4j+Milvus) |
+| eam | 8107 | `eam_server.eam_server` | 设备资产 |
+| wms | 8108 | `wms_server.wms_server` | 仓储管理 |
+| plc | 8110 | `plc_server.plc_server` | 产线控制 |
 
 ## 本地启动
 
