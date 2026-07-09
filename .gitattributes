@@ -1,0 +1,14 @@
+# Git 属性 — 确保跨平台一致性
+* text=auto eol=lf
+
+# Python 源码
+*.py text diff=python
+
+# 文档
+*.md text
+*.yml text
+*.yaml text
+
+# 二进制
+*.png binary
+*.jpg binary
