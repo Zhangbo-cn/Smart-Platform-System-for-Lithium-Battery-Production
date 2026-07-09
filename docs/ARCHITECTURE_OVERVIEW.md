@@ -6,10 +6,10 @@
 |------|:----:|------|------|------|
 | Client Gateway | 8010 | 入口 | 无 LLM | 用户 HTTP 入口、SSE 推送 |
 | Planner Agent | 8011 | Agent | ReAct LLM + 规则 | 理解用户意图，选 playbook |
-| Orchestrator | 8020 | 工作流引擎 | YAML + SmartRouter(可选LLM) | 按 YAML 剧本调 Agent，支持 LLM 智能路由 |
+| Orchestrator | 8020 | 工作流引擎 | DAGEngine + SmartRouter(可选LLM) | DAG 并行编排，支持智能路由 |
 | Triage Agent | 8001 | Agent | LLM + 规则双模 (AsyncA2AServer) | 异常分诊，识别 defect_type |
 | Trace Worker | 8002 | Worker | 无 LLM (AsyncA2AServer) | MCP 取证，纯数据查询 |
-| RCA Agent | 8003 | Agent | LangGraph 有环图 (AsyncA2AServer) | 跨 MCP 取证，锁定根因 |
+| RCA Agent | 8003 | Agent | LangGraph 有环图 (AsyncA2AServer) | 内联 triage+trace + Planner→Executor→Reflector |
 | Reporter Agent | 8004 | Agent | Deep Agent (AsyncA2AServer) | 8D 报告生成，QMS 写回 |
 | Patrol Agent | 8005 | Agent | 规则 (AsyncA2AServer) | 开班巡线摘要 |
 | Quality Prediction | 8201 | Agent | 规则 (AsyncA2AServer) | SPC 预警 |
@@ -44,12 +44,14 @@
                               │  SmartRouter (opt-in LLM) │
                               └───────────────────────────┘
                                           │
-                              Orchestrator 依次调：
-                              Triage(8001) → Trace(8002) → RCA(8003) → Reporter(8004)
-                                          │
-                                    每步可被 SmartRouter 替换：
-                                    enable_smart_routing=true 时，
-                                    LLM 建议替换 agent（置信度 >= 0.8 生效）
+                              Orchestrator 按 DAG 编排：
+                              步骤可并行（triage ∥ trace）
+                              可条件分支、熔断回退
+                              RCA 内部 LangGraph 含 triage + gather + planner + executor + reflector + reporter
+
+                              每步可被 SmartRouter 替换：
+                              enable_smart_routing=true 时，
+                              LLM 建议替换 agent（置信度 >= 0.8 生效）
 ```
 
 Orchestrator 不是 Agent，它只是用 A2AClient 发 HTTP 请求。每次 A2A 调用 = JSON-RPC over HTTP POST。
@@ -99,6 +101,24 @@ POST /v1/assistant/tasks → 202 + sse_url（不等执行）
 
 Worker 代码只有调 MCP 接口→拼数据→返回，没有 LLM 调用。
 
-## 为什么 Orchestrator 不用 LangGraph
+## 编排引擎：DAGEngine
 
-Orchestrator 做确定性编排，不需要推理。LangGraph 留给需要动态决策的地方（RCA Agent 内部）。
+Orchestrator 使用 DAGEngine（替代旧 PlaybookEngine 的线性 for 循环）：
+
+| 能力 | PlaybookEngine | DAGEngine |
+|------|---------------|-----------|
+| 执行模型 | 线性遍历 | 有向无环图 |
+| 并行节点 | ❌ | ✅ |
+| 条件分支 | ❌ | ✅ |
+| 重试熔断 | 简单 required | max_retry + fallback |
+| 复合条件 | ✅ "not A and not B" | ✅ |
+
+LangGraph 留给需要动态决策的地方（RCA Agent 内部）。
+
+## 记忆系统
+
+| 层 | 存储 | 功能 |
+|----|------|------|
+| STM | Redis TTL 30min | 对话轮次，超 10 轮自动压缩到 6 轮 |
+| Working | PostgreSQL | 轮次记录 + Token 追踪 + 工具调用压缩 |
+| LTM | Milvus + Neo4j | 高置信度根因案例向量检索 |
