@@ -175,7 +175,7 @@ POST /v1/report/8d
 | triage-agent | mes | 2 个 |
 | report-8d-agent | qms, knowledge | 3 个（P1） |
 
-完整矩阵与架构图：**[MCP_TOOL_MATRIX.md](./MCP_TOOL_MATRIX.md)** · [ARCHITECTURE_DIAGRAMS.md](./ARCHITECTURE_DIAGRAMS.md) 图 3b。
+完整矩阵：**[mcp_tool_matrix.py](../packages/platform-contracts/src/platform_contracts/mcp_tool_matrix.py)** · 架构图见 [ARCHITECTURE_OVERVIEW.md](./ARCHITECTURE_OVERVIEW.md)。
 
 ## 3. PlatformContext 字段读写矩阵
 
@@ -201,8 +201,7 @@ POST /v1/report/8d
 
 ## 4. 协作图（A2A + Router）
 
-> **星型规则**：业务 Agent **仅**与 AgentRouter 通信（实线）；剧本中的逻辑先后见 [PLAYBOOK.md](./PLAYBOOK.md)，**不**表示 Agent 直连。  
-> Mermaid 预览见 [ARCHITECTURE_DIAGRAMS.md](./ARCHITECTURE_DIAGRAMS.md) 文首兼容性说明。
+> **星型规则**：业务 Agent 通过 Orchestrator 编排；剧本定义见 [ARCHITECTURE_OVERVIEW.md](./ARCHITECTURE_OVERVIEW.md)。
 
 ```mermaid
 flowchart TB
