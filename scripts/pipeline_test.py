@@ -8,7 +8,9 @@ PROCS = []
 
 def start_mcp():
     for mod in ["mes_server.mes_server","scada_server.scada_server",
-                "erp_server.erp_server","lims_server.lims_server","qms_server.qms_server"]:
+                "erp_server.erp_server","lims_server.lims_server","qms_server.qms_server",
+                "knowledge_server.app","eam_server.eam_server","wms_server.wms_server",
+                "plc_server.plc_server"]:
         p = subprocess.Popen([sys.executable,"-m",mod], cwd=str(MCP_DIR),
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         PROCS.append(p)
