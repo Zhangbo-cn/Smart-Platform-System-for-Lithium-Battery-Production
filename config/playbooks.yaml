@@ -1,10 +1,18 @@
 # Playbook 剧本配置 — 替代 orchestrator/app.py 的硬编码 if-else
 # 新增剧本只需加一条 YAML entry + 对应 Agent 的 AgentCard
+#
+# 格式说明：
+#   nodes:     DAG 节点，支持 depends_on 表达依赖关系
+#   parallel:  true 表示同层可并行执行
+#   branches:  条件分支（满足 condition 时走 target 节点）
+#   hitl_check: 节点返回中指定字段为真时暂停等人工
+#   fallback:  失败/空结果时的兜底策略
+#   depends_on: 前置依赖节点 ID（不填为起始节点）
 playbooks:
   trace_only:
     description: 批次查询
-    steps:
-      - step: trace
+    nodes:
+      trace:
         agent: trace-worker
         required: true
         context_write:
@@ -13,15 +21,16 @@ playbooks:
 
   rca:
     description: 单点根因分析
-    steps:
-      - step: trace
+    nodes:
+      trace:
         agent: trace-worker
         condition: "batch_id"
         context_write:
           prior_evidence: "response.evidence"
           prior_tool_calls: "response.tool_calls"
-      - step: rca
+      rca:
         agent: quality-rca-agent
+        depends_on: [trace]
         required: true
         context_write:
           rca.thread_id: "response.thread_id"
@@ -29,26 +38,29 @@ playbooks:
           rca.confidence: "response.confidence"
 
   investigate:
-    description: 深度分析：分诊→追溯→RCA
-    steps:
-      - step: triage
+    description: "深度分析：分诊→追溯→RCA（triage 与 trace 可并行）"
+    nodes:
+      triage:
         agent: triage-agent
         condition: "not skip_triage and not defect_type"
+        parallel: true
         context_write:
           defect_type: "result.defect_type"
           severity: "result.severity"
-      - step: trace
+      trace:
         agent: trace-worker
         condition: "batch_id"
+        parallel: true
         context_write:
           prior_evidence: "response.evidence"
           prior_tool_calls: "response.tool_calls"
-      - step: confirm_rca
+      confirm_rca:
         type: input_required
+        depends_on: [triage, trace]
         condition: "not confirm_rca"
-        message: "请确认是否继续 RCA"
-      - step: rca
+      rca:
         agent: quality-rca-agent
+        depends_on: [triage, trace]
         required: true
         context_write:
           rca.thread_id: "response.thread_id"
@@ -59,16 +71,19 @@ playbooks:
           on_hitl: input_required
 
   close_loop:
-    description: 质量闭环：RCA→8D→QMS
-    steps:
-      - step: triage
+    description: "质量闭环：RCA→8D→QMS（triage/trace 并行 → rca → report_8d）"
+    nodes:
+      triage:
         agent: triage-agent
         condition: "not skip_triage and not defect_type"
-      - step: trace
+        parallel: true
+      trace:
         agent: trace-worker
         condition: "batch_id"
-      - step: rca
+        parallel: true
+      rca:
         agent: quality-rca-agent
+        depends_on: [triage, trace]
         required: true
         context_write:
           rca.thread_id: "response.thread_id"
@@ -80,8 +95,9 @@ playbooks:
         fallback:
           on_empty: "root_cause"
           on_failure: true
-      - step: report_8d
+      report_8d:
         agent: report-reporter-agent
+        depends_on: [rca]
         required: true
         condition: "rca.root_cause"
         context_write:

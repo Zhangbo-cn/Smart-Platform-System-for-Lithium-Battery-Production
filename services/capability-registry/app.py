@@ -288,7 +288,7 @@ async def heartbeat_agent(req: HeartbeatRequest) -> dict:
             if name in _DYNAMIC_CARDS:
                 _HEALTH[name] = AgentHealthRecord(
                     name=name,
-                    status=AgentHealthStatus.UP,
+                    status=AgentHealthStatus.OK,
                     url=card.url,
                     detail="heartbeat received",
                 )

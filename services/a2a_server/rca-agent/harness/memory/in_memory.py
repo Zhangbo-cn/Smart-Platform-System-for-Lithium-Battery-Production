@@ -38,6 +38,10 @@ class InMemorySTM:
         raw = self._lists.get(key, [])[-last_n:]
         return [json.loads(r) for r in raw]
 
+    async def reset_turns(self, session_id: str) -> None:
+        key = self._key(session_id, "turns")
+        self._lists.pop(key, None)
+
     async def clear(self, session_id: str) -> None:
         prefix = f"agent:stm:{session_id}:"
         for k in list(self._store):
@@ -49,22 +53,52 @@ class InMemorySTM:
 
 
 class InMemoryWorking:
-    """Working memory fallback: user prefs + open issues + session summaries in-process."""
+    """Working memory fallback: user prefs + open issues + session summaries + round records."""
 
     def __init__(self) -> None:
         self._prefs: dict[str, dict] = {}
         self._issues: list[dict] = []
         self._summaries: list[dict] = []
+        self._rounds: list[dict] = []
 
     async def init(self) -> None:
         pass  # no-op for in-memory
 
+    # ── 轮次记录 ──────────────────────────────────────
+    async def save_round(self, session_id: str, round_id: int, user_id: str, *,
+                         trace_id: str | None = None,
+                         input_data: dict | None = None,
+                         plan_summary: str | None = None,
+                         tool_calls: list | None = None,
+                         key_findings: list | None = None,
+                         output_data: dict | None = None,
+                         token_usage: dict | None = None) -> None:
+        self._rounds.append({
+            "session_id": session_id, "round_id": round_id,
+            "user_id": user_id, "trace_id": trace_id,
+            "input_data": input_data or {},
+            "plan_summary": plan_summary,
+            "tool_calls": tool_calls or [],
+            "key_findings": key_findings or [],
+            "output_data": output_data or {},
+            "token_usage": token_usage or {},
+            "created_at": datetime.utcnow().isoformat(),
+        })
+
+    async def get_rounds(self, session_id: str, limit: int = 10) -> list[dict]:
+        return [r for r in self._rounds if r["session_id"] == session_id][-limit:]
+
+    async def get_round_count(self, session_id: str) -> int:
+        return len([r for r in self._rounds if r["session_id"] == session_id])
+
+    # ── 用户偏好 ──────────────────────────────────────
     async def get_preferences(self, user_id: str) -> dict[str, Any]:
         return self._prefs.get(user_id, {})
 
     async def upsert_preferences(self, user_id: str, prefs: dict) -> None:
         self._prefs.setdefault(user_id, {}).update(prefs)
 
+    # ── 待办事项 ──────────────────────────────────────
     async def add_open_issue(self, issue_id: str, user_id: str, title: str, payload: dict) -> None:
         self._issues.append({
             "issue_id": issue_id, "user_id": user_id,
@@ -75,6 +109,7 @@ class InMemoryWorking:
     async def list_open_issues(self, user_id: str) -> list[dict]:
         return [i for i in self._issues if i["user_id"] == user_id]
 
+    # ── 会话摘要 ──────────────────────────────────────
     async def save_session_summary(self, session_id: str, user_id: str, summary: str) -> None:
         self._summaries.append({
             "session_id": session_id, "user_id": user_id,

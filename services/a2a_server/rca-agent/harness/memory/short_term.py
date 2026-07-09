@@ -41,6 +41,10 @@ class ShortTermMemory:
         raw = await self.redis.lrange(key, -last_n, -1)
         return [json.loads(r) for r in raw]
 
+    async def reset_turns(self, session_id: str) -> None:
+        key = self._key(session_id, "turns")
+        await self.redis.delete(key)
+
     async def clear(self, session_id: str) -> None:
         async for k in self.redis.scan_iter(match=f"agent:stm:{session_id}:*"):
             await self.redis.delete(k)

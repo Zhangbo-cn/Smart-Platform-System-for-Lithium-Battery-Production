@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -19,7 +19,7 @@ async def get_maintenance_log(
     """查询设备维保记录。"""
     return {
         "equipment_id": equipment_id,
-        "window": [start_time or "2026-01-01", end_time or datetime.utcnow().isoformat()],
+        "window": [start_time or "2026-01-01", end_time or datetime.now(timezone.utc).isoformat()],
         "logs": [
             {
                 "date": "2026-06-15",

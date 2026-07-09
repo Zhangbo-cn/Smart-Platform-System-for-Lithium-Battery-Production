@@ -1,6 +1,16 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from platform_contracts.mcp_tool_matrix import allowed_tools_for
+
+AgentType = Literal[
+    "llm_agent",       # 有 LLM 推理的复杂 Agent（RCA、Report、Patrol）
+    "data_worker",     # 纯数据查询，无 LLM（Trace Worker）
+    "external_bridge", # 写外部系统（QMS、PLC）
+    "router",          # 路由/编排（Orchestrator、Gateway）
+    "planner",         # 意图识别/规划（Planner Agent）
+]
 
 
 class AgentSkill(BaseModel):
@@ -17,6 +27,7 @@ class AgentCard(BaseModel):
     description: str
     url: str
     version: str = "1.0.0"
+    agent_type: AgentType = "llm_agent"
     capabilities: list[str]
     skills: list[AgentSkill] = Field(default_factory=list)
     mcp_servers: list[str] = Field(default_factory=list)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -16,7 +16,7 @@ async def query_batch_trace(
 ) -> dict[str, Any]:
     """Query the full station-by-station production trace for a cell or batch."""
     return {
-        "batch_id": batch_id or f"B-{datetime.utcnow():%Y%m%d}",
+        "batch_id": batch_id or f"B-{datetime.now(timezone.utc):%Y%m%d}",
         "cell_barcode": cell_barcode,
         "stations": [
             {"step": "mixing", "equipment": "MIX-01", "operator": "U001", "ts": "2026-05-29T08:10:00"},
@@ -79,7 +79,7 @@ async def get_shift_summary(
         shift: D=白班 N=夜班
         date: 日期 YYYY-MM-DD，默认当天
     """
-    from datetime import datetime, timezone
+    from datetime import timezone, datetime
     d = date or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return {
         "line_id": line_id,

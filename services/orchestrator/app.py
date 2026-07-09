@@ -17,6 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from harness_core.audit.tracer import new_trace_id, set_trace_id
 from harness_core.context.session_store import SessionStore, build_session_store
+from harness_core.dag_engine import DAGEngine
 from harness_core.events.bus import get_event_bus, init_event_bus
 from harness_core.events.stream import publish_task_event, sse_event_stream
 from harness_core.playbook_engine import PlaybookEngine
@@ -59,6 +60,8 @@ class OrchestratorSettings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     postgres_dsn: str = "postgresql://battery:battery@localhost:5432/battery_agent"
     context_ttl_seconds: int = 86_400
+    # DAG 引擎开关：true 用 DAG 引擎，false 用旧版 PlaybookEngine
+    enable_dag_engine: bool = True
 
 
 settings = OrchestratorSettings()
@@ -118,6 +121,7 @@ _sessions: SessionStore = build_session_store(
 
 # Playbook DSL 引擎（替代硬编码 if-else）
 _playbook_engine: PlaybookEngine | None = None
+_dag_engine: DAGEngine | None = None
 # 智能路由
 _smart_router: SmartRouter | None = None
 
@@ -158,10 +162,18 @@ class AsyncDispatchResponse(BaseModel):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _playbook_engine, _discovered_cards, _smart_router
+    global _playbook_engine, _dag_engine, _discovered_cards, _smart_router
     init_event_bus(settings.event_backend, redis_url=settings.redis_url)
-    _playbook_engine = PlaybookEngine(Path(__file__).parent.parent.parent / "config" / "playbooks.yaml")
+
+    playbook_path = Path(__file__).parent.parent.parent / "config" / "playbooks.yaml"
+    _playbook_engine = PlaybookEngine(playbook_path)
     _playbook_engine.load()
+
+    if settings.enable_dag_engine:
+        _dag_engine = DAGEngine.from_yaml(playbook_path)
+        logger.info("router.dag_enabled", playbooks=len(_dag_engine.playbooks))
+    else:
+        _dag_engine = None
 
     # 初始化智能路由（仅 enabled 时才创建 LLM client）
     if settings.enable_smart_routing:
@@ -513,6 +525,75 @@ async def _run_report_8d(
     return rep
 
 
+# ── Agent 调度辅助（按 agent_type 动态分发）──────────────
+
+
+async def _a2a_forward(
+    delegator: A2AClient,
+    agent_name: str,
+    agent_url: str,
+    ctx: PlatformContext,
+    req: DispatchRequest,
+    session_id: str,
+    trace_id: str,
+) -> dict:
+    """通用 A2A 转发：将当前上下文转发给 LLM Agent，由其自行决定如何处理。
+
+    适用于所有 agent_type="llm_agent" 的服务（RCA、Report、Patrol 等）。
+    各 Agent 暴露统一的 A2A tasks/send 接口，Orchestrator 不需要知道内部细节。
+    """
+    payload = {
+        "session_id": session_id,
+        "trace_id": trace_id,
+        "batch_id": ctx.batch_id or req.batch_id,
+        "defect_type": ctx.defect_type or req.defect_type,
+        "user_query": req.message or "",
+    }
+    try:
+        return await _a2a_send(
+            delegator, agent_url, payload,
+            session_id=session_id, schema="DispatchRequest",
+        )
+    except Exception as exc:
+        logger.warning("a2a_forward.failed", agent=agent_name, error=str(exc))
+        return {"_fallback": True, "_fallback_reason": str(exc)}
+
+
+async def _dispatch_by_name(
+    agent_name: str,
+    delegator: A2AClient,
+    ctx: PlatformContext,
+    req: DispatchRequest,
+    session_id: str,
+    trace_id: str,
+    engine_ctx: dict,
+) -> dict:
+    """按 agent 名字硬编码分发（兼容旧配置 + triage/trace/rca/report 特殊逻辑）。"""
+    if agent_name in ("triage-stub", "triage-agent"):
+        await _apply_triage(delegator, ctx, req, session_id, trace_id)
+        return {"defect_type": ctx.defect_type or "", "severity": ctx.severity or "medium"}
+
+    if agent_name == "trace-worker":
+        await _run_trace(delegator, ctx, req, session_id, trace_id)
+        return {"evidence": list(ctx.prior_evidence), "tool_calls": list(ctx.prior_tool_calls)}
+
+    if agent_name == "quality-rca-agent":
+        return await _run_rca(delegator, ctx, req, session_id, trace_id)
+
+    if agent_name == "report-reporter-agent":
+        hitl_approved = req.hitl_approved or bool(engine_ctx.get("hitl_approved", False))
+        return await _run_report_8d(delegator, ctx, session_id, trace_id, hitl_approved=hitl_approved)
+
+    # 智能路由建议了未知 agent → 查一下 AgentCard
+    net = _agent_network()
+    card = net.get_card(agent_name)
+    if card:
+        logger.info("dispatch.by_card", agent=agent_name, agent_type=card.agent_type)
+        return {"_note": f"dispatched_by_card:{agent_name}", "agent_type": card.agent_type}
+
+    raise ValueError(f"Unknown agent: {agent_name}")
+
+
 async def _run_playbook(
     ctx: PlatformContext,
     req: DispatchRequest,
@@ -532,20 +613,25 @@ async def _run_playbook(
         message=f"playbook={req.playbook}",
     )
 
-    engine = _playbook_engine
-    if not engine or not engine._loaded:
+    # DAG 引擎优先（enable_dag_engine=True 时启用）
+    use_dag = settings.enable_dag_engine and _dag_engine is not None
+    engine = _dag_engine if use_dag else _playbook_engine
+    if not engine:
+        raise HTTPException(500, "No playbook engine loaded")
+    if not use_dag and getattr(_playbook_engine, '_loaded', False) is False:
         raise HTTPException(500, "PlaybookEngine not loaded")
 
     async with httpx.AsyncClient(timeout=settings.http_timeout) as client:
         delegator = A2AClient(client, headers=headers)
 
-        # ---- call_step 回调：将 engine 的"调 agent"映射到实际 A2A 调用 ----
+        # ---- call_step 回调：基于 AgentCard.agent_type 动态分发 ----
         async def _call_step(agent_name: str, step_def: dict, engine_ctx: dict) -> dict:
-            # 智能路由：LLM 建议替换 agent（仅 enable_smart_routing 时生效）
             resolved_name = agent_name
-            router = _smart_router
-            if router and settings.enable_smart_routing:
-                suggested_name, confidence, reasoning = await router.suggest(
+            smart_router = _smart_router
+
+            # 智能路由：LLM 建议替换 agent（仅 enable_smart_routing 时生效）
+            if smart_router and settings.enable_smart_routing:
+                suggested_name, confidence, reasoning = await smart_router.suggest(
                     playbook=req.playbook,
                     current_step=agent_name,
                     default_agent=agent_name,
@@ -557,57 +643,45 @@ async def _run_playbook(
                 )
                 if (suggested_name != agent_name
                     and confidence >= settings.smart_routing_confidence_threshold):
-                    logger.info(
-                        "router.rerouted",
-                        from_agent=agent_name, to=suggested_name,
-                        confidence=confidence, reasoning=reasoning,
-                    )
+                    logger.info("router.rerouted", from_agent=agent_name, to=suggested_name,
+                                confidence=confidence, reasoning=reasoning)
                     resolved_name = suggested_name
 
-            # 记录已完成步骤（供后续路由参考）
+            # 记录已完成步骤
             completed = list(ctx.artifacts.get("completed_steps", []))
             completed.append(resolved_name)
             ctx.artifacts["completed_steps"] = completed
 
-            if resolved_name in ("triage-stub", "triage-agent"):
-                await _apply_triage(delegator, ctx, req, session_id, trace_id)
-                return {
-                    "defect_type": ctx.defect_type or "",
-                    "severity": ctx.severity or "medium",
-                }
+            # 查 AgentCard 获取 agent_type
+            net = _agent_network()
+            card = net.get_card(resolved_name)
 
-            if resolved_name == "trace-worker":
-                await _run_trace(delegator, ctx, req, session_id, trace_id)
-                return {
-                    "evidence": list(ctx.prior_evidence),
-                    "tool_calls": list(ctx.prior_tool_calls),
-                }
+            # ---- 按 agent_type 分发 ----
+            if card and card.agent_type in ("router",):
+                # 路由类：内部函数直接处理（triage/trace/rca/report 等特殊逻辑保留）
+                return await _dispatch_by_name(resolved_name, delegator, ctx, req,
+                                                session_id, trace_id, engine_ctx)
 
-            if resolved_name == "quality-rca-agent":
-                return await _run_rca(delegator, ctx, req, session_id, trace_id)
+            if card and card.agent_type == "data_worker":
+                # 数据工作类：通用 MCP 查询（不需要 LLM）
+                if resolved_name == "trace-worker":
+                    await _run_trace(delegator, ctx, req, session_id, trace_id)
+                    return {"evidence": list(ctx.prior_evidence), "tool_calls": list(ctx.prior_tool_calls)}
+                # 其他 data_worker 按统一模式执行
+                return {"_note": f"data_worker:{resolved_name}", "result": {}}
 
-            if resolved_name == "report-reporter-agent":
-                hitl_approved = req.hitl_approved or bool(
-                    engine_ctx.get("hitl_approved", False)
-                )
-                return await _run_report_8d(
-                    delegator, ctx, session_id, trace_id, hitl_approved=hitl_approved,
-                )
+            if card and card.agent_type in ("llm_agent", "planner"):
+                # LLM Agent：通用 A2A 转发
+                return await _a2a_forward(delegator, resolved_name, card.url,
+                                           ctx, req, session_id, trace_id)
 
-            # 智能路由建议了未知 agent → 退回原始
-            if resolved_name != agent_name:
-                logger.warning("router.unknown_agent_fallback", name=resolved_name, fallback=agent_name)
+            # 没有 AgentCard 或未知类型 → 尝试按 agent_type 默认行为
+            if not card:
+                logger.warning("dispatch.no_agent_card", agent=resolved_name)
 
-            # 确保原始 agent 也有对应的处理分支
-            if agent_name == "trace-worker":
-                await _run_trace(delegator, ctx, req, session_id, trace_id)
-                return {"evidence": list(ctx.prior_evidence), "tool_calls": list(ctx.prior_tool_calls)}
-            if agent_name == "quality-rca-agent":
-                return await _run_rca(delegator, ctx, req, session_id, trace_id)
-            if agent_name == "report-reporter-agent":
-                return await _run_report_8d(delegator, ctx, session_id, trace_id, hitl_approved=False)
-
-            raise ValueError(f"Unknown agent: {resolved_name}")
+            # 最终兜底：按硬编码名字匹配（兼容旧配置）
+            return await _dispatch_by_name(resolved_name, delegator, ctx, req,
+                                            session_id, trace_id, engine_ctx)
 
         # ---- emit_event 回调：将引擎事件转为 SSE 推送 ----
         async def _emit_event(event_type: str, step: str, agent: str, message: str) -> None:

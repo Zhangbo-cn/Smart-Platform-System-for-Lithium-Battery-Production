@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -28,7 +28,7 @@ async def create_8d_draft(
         "batch_id": batch_id,
         "status": "draft",
         "report_md": report_md,
-        "created_at": datetime.utcnow().isoformat() + "Z",
+        "created_at": datetime.now(timezone.utc).isoformat() + "Z",
     }
     _CAPA_STORE[capa_id] = record
     return {"capa_id": capa_id, "status": "draft", "qms_record_id": capa_id}
@@ -46,7 +46,7 @@ async def update_capa_status(
         return {"capa_id": capa_id, "status": status, "updated": False, "error": "not_found"}
     record["status"] = status
     record["comment"] = comment
-    record["updated_at"] = datetime.utcnow().isoformat() + "Z"
+    record["updated_at"] = datetime.now(timezone.utc).isoformat() + "Z"
     return {"capa_id": capa_id, "status": status, "updated": True}
 
 

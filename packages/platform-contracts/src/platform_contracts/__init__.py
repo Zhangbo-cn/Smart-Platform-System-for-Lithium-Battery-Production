@@ -3,7 +3,7 @@
 from platform_contracts.a2a import A2AClient, A2AError, mount_a2a
 from platform_contracts.a2a_server import AsyncA2AServer
 from platform_contracts.agent_network import AgentNetwork
-from platform_contracts.agent_card import AgentCard, AgentSkill
+from platform_contracts.agent_card import AgentCard, AgentSkill, AgentType
 from platform_contracts.agent_handoffs import (
     RcaArtifactDraft,
     RcaHitlResolveRequest,
@@ -42,6 +42,13 @@ from platform_contracts.mcp_tool_matrix import (
     tool_policies_for,
 )
 from platform_contracts.smart_router import SmartRouter
+from platform_contracts.tool_meta import (
+    ToolMeta,
+    ToolParam,
+    ValidationResult,
+    build_tool_schema_for_llm,
+    validate_plan_step,
+)
 from platform_contracts.platform_context import PlatformContext
 from platform_contracts.task_events import (
     TERMINAL_TASK_EVENTS,
@@ -60,6 +67,7 @@ __all__ = [
     "AgentNetwork",
     "AgentCard",
     "AgentSkill",
+    "AgentType",
     "PlatformContext",
     "TaskState",
     "TaskEvent",

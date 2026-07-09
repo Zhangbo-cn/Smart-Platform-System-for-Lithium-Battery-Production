@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -22,7 +22,7 @@ async def emergency_stop(
         "line_id": line_id,
         "reason": reason,
         "operator_id": operator_id,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
         "status": "stopped",
         "affected_equipment": [f"{line_id}-COAT", f"{line_id}-ROLL", f"{line_id}-SLIT"],
         "safety_interlock": "engaged",
@@ -47,7 +47,7 @@ async def write_setpoint(
         "value": value,
         "operator_id": operator_id,
         "reason": reason,
-        "ts": datetime.utcnow().isoformat(),
+        "ts": datetime.now(timezone.utc).isoformat(),
         "previous_value": 0.0,  # stub
         "status": "applied",
     }

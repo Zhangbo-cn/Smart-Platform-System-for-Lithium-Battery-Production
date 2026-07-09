@@ -123,7 +123,11 @@ async def search_fmea(defect_type: str = "", keyword: str = "") -> str:
         defect_type: 缺陷类型（可选）
         keyword: 搜索关键词（可选）
     """
-    await _ensure_clients()
+    try:
+        await _ensure_clients()
+    except Exception as exc:
+        logger.error("search_fmea.backend_error", error=str(exc))
+        return json.dumps({"hits": [], "error": str(exc)}, ensure_ascii=False)
 
     if not _neo4j:
         return json.dumps({"hits": [], "note": "FMEA 服务未就绪"}, ensure_ascii=False)

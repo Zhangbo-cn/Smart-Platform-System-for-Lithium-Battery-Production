@@ -1,6 +1,6 @@
 """全平台 AgentCard 种子（A2A 服务 ID；见 docs/TERMINOLOGY.md）。"""
 
-from platform_contracts.agent_card import AgentCard, AgentSkill, RCA_AGENT_CARD
+from platform_contracts.agent_card import AgentCard, AgentSkill, AgentType, RCA_AGENT_CARD
 from platform_contracts.mcp_tool_matrix import allowed_tools_for
 
 # 控制面（均非 Agent）
@@ -8,6 +8,7 @@ CLIENT_GATEWAY_CARD = AgentCard(
     name="client-gateway",
     description="Client Gateway：用户门户，转发 Orchestrator（无 LLM）",
     url="http://localhost:8010/a2a/v1",
+    agent_type="router",
     capabilities=["user_gateway", "task_status_push"],
     skills=[
         AgentSkill(
@@ -32,6 +33,7 @@ ORCHESTRATOR_CARD = AgentCard(
     name="playbook-orchestrator",
     description="Playbook Orchestrator：固定剧本委派 A2A 服务（无 LLM）",
     url="http://localhost:8020/a2a/v1",
+    agent_type="router",
     capabilities=["routing", "playbook_orchestration", "platform_context"],
     skills=[
         AgentSkill(
@@ -58,6 +60,7 @@ CAPABILITY_REGISTRY_CARD = AgentCard(
     name="capability-registry",
     description="Capability Registry：A2A 服务登记与健康探活",
     url="http://localhost:8021/a2a/v1",
+    agent_type="router",
     capabilities=["agent_registry", "health_probe"],
     skills=[
         AgentSkill(
@@ -83,6 +86,7 @@ PLANNER_CARD = AgentCard(
     name="planner",
     description="Planner Agent：NL → playbook + 参数（ReAct + Tool Use）",
     url="http://localhost:8011/a2a/v1",
+    agent_type="planner",
     capabilities=["task_planning", "playbook_selection"],
     skills=[
         AgentSkill(
@@ -143,6 +147,7 @@ TRACE_WORKER_CARD = AgentCard(
     name="trace-worker",
     description="Trace Worker：批次追溯，输出 prior_evidence 供 RCA",
     url="http://localhost:8002/a2a/v1",
+    agent_type="data_worker",
     capabilities=["batch_trace", "process_params"],
     mcp_servers=["mes", "scada", "erp", "lims"],
     allowed_tools=allowed_tools_for("trace-worker"),

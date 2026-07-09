@@ -323,6 +323,17 @@ async def lifespan(app: FastAPI):
     app.state.svc = svc
     server.mount(app)
 
+    # 统一可观测性初始化（OTel 主 tracing + LangSmith 可选）
+    from harness_core.observability import init_observability, instrument_fastapi
+    _otel_ok = init_observability(
+        service_name="quality-rca-agent",
+        otel_endpoint=getattr(settings, "otel_exporter_otlp_endpoint", None),
+        langsmith_api_key=getattr(settings, "langsmith_api_key", None),
+        langsmith_project=getattr(settings, "langsmith_project", "battery-agent"),
+    )
+    if _otel_ok:
+        instrument_fastapi(app)
+
     # 注册到 Capability Registry
     await register_with_registry(
         registry_url=settings.registry_url,

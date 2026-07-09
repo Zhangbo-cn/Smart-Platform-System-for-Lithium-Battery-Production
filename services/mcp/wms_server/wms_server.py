@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import timezone, datetime
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
@@ -24,7 +24,7 @@ async def get_inventory(
         "quantity_kg": 2500.0,
         "available_kg": 1800.0,
         "lot_number": "L20260610-NMC-A",
-        "last_updated": datetime.utcnow().isoformat(),
+        "last_updated": datetime.now(timezone.utc).isoformat(),
     }
 
 
