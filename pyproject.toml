@@ -1,0 +1,17 @@
+[project]
+name = "battery-agent-platform"
+version = "1.0.0"
+description = "锂电智能制造 AI 平台 — A2A + MCP 架构"
+requires-python = ">=3.12"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = [
+    "packages/harness-core/tests",
+    "packages/platform-contracts/tests",
+    "tests",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
