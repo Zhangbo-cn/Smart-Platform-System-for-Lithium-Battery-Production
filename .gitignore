@@ -32,3 +32,6 @@ Thumbs.db
 # if accidentally copied, ignore local artifacts only:
 services/rca-agent/.env
 .claude/scheduled_tasks.lock
+
+# Work traces
+traces/
