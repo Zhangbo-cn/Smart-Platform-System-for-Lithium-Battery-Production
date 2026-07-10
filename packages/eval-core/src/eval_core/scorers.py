@@ -6,7 +6,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from eval_core.judge import JudgeVerdict
 
 
 # ── 评分结果类型 ──────────────────────────────────────────────
