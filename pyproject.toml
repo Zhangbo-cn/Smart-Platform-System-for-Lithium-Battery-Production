@@ -11,6 +11,11 @@ testpaths = [
     "packages/platform-contracts/tests",
     "tests",
 ]
+pythonpath = [
+    "packages/eval-core/src",
+    "packages/platform-contracts/src",
+    "packages/harness-core/src",
+]
 
 [tool.ruff]
 line-length = 120

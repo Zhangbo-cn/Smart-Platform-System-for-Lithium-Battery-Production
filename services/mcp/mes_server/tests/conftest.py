@@ -7,7 +7,7 @@ _SERVICE = _HERE.parent
 _PARENT = _SERVICE.parent
 
 if str(_SERVICE) not in sys.path:
-    sys.path.insert(0, str(_SERVICE))
+    sys.path.append( str(_SERVICE))
 # Some MCP servers may need the parent mcp/ dir
 if str(_PARENT) not in sys.path:
-    sys.path.insert(0, str(_PARENT))
+    sys.path.append( str(_PARENT))
