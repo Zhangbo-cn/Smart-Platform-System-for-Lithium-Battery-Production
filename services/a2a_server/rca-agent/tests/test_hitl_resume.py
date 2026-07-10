@@ -1,4 +1,4 @@
-"""HITL interrput/resume + MemoryHarness 测试。"""
+"""HITL interrupt/resume + MemoryHarness 测试。"""
 
 from __future__ import annotations
 
