@@ -17,8 +17,7 @@ from harness.hitl.resume import (
     is_interrupted,
     resume_command,
 )
-from harness.memory.in_memory import InMemorySTM
-from harness.memory.long_term import LongTermMemory
+from harness.memory.in_memory import InMemoryLTM, InMemorySTM
 
 
 class _S(TypedDict, total=False):
@@ -113,7 +112,7 @@ async def test_memory_harness_builds_layered_context():
     harness = MemoryHarness(
         stm=InMemorySTM(),
         working=None,
-        ltm=LongTermMemory(),
+        ltm=InMemoryLTM(),
     )
     session = "sess-1"
     await harness.stm.append_turn(session, "user", "上次容量偏低")
@@ -135,7 +134,7 @@ async def test_memory_harness_persist_short_term():
     harness = MemoryHarness(
         stm=InMemorySTM(),
         working=None,
-        ltm=LongTermMemory(),
+        ltm=InMemoryLTM(),
     )
     session = "sess-2"
     await harness.persist_analysis(
