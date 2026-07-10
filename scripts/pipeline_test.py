@@ -38,7 +38,7 @@ async def wait_health(ports, timeout=60):
                         results[port] = True
                         print(f"  port {port} ✅")
                         break
-                except: pass
+                except Exception: pass
                 await asyncio.sleep(1)
             else:
                 results[port] = False

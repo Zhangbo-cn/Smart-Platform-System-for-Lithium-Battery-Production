@@ -38,7 +38,7 @@ async def wait_health(ports, timeout=90, label=""):
                     if r.status_code == 200:
                         log(f"  {label}:{port} ✅")
                         break
-                except: pass
+                except Exception: pass
                 await asyncio.sleep(1)
             else:
                 log(f"  {label}:{port} ❌")
